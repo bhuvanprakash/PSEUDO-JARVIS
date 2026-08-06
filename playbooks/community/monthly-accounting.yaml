@@ -1,0 +1,53 @@
+# Example community playbook — finance workflow template.
+
+apiVersion: jarvis.dev/v1
+kind: Playbook
+metadata:
+  name: monthly-accounting
+  description: Categorize invoice PDFs and draft accountant email
+  tags: [finance, monthly]
+  author: community
+
+spec:
+  triggers:
+    phrases:
+      - "monthly close"
+      - "do the friday thing"
+    schedule: "0 17 * * 5"
+
+  defaults:
+    trust: confirm
+  schedule_trust: confirm
+
+  allow_paths:
+    - ~/Documents/finance
+    - ~/Downloads/invoices
+
+  steps:
+    - id: categorize
+      name: Rename invoice PDFs by date and vendor
+      type: file-transform
+      trust: auto
+      config:
+        glob: ~/Downloads/invoices/*.pdf
+        rename: "{year}-{month}_{vendor}.pdf"
+
+    - id: archive
+      name: Move to finance archive folder
+      type: file-transform
+      trust: auto
+      depends_on: [categorize]
+      config:
+        glob: ~/Downloads/invoices/*.pdf
+        move_to: ~/Documents/finance/{{ year }}/{{ month }}/
+
+    - id: draft-email
+      name: Draft email to accountant
+      type: draft-email
+      trust: confirm
+      depends_on: [archive]
+      config:
+        to: accountant@example.com
+        subject: "Monthly close — {{ year }}-{{ month }}"
+        body_template: playbooks/monthly-accounting/email.md
+        attachments_glob: ~/Documents/finance/{{ year }}/{{ month }}/*.pdf
