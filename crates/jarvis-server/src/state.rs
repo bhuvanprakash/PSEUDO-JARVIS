@@ -1,0 +1,33 @@
+use std::sync::Arc;
+
+use jarvis_core::config::Config;
+use jarvis_core::paths::VaultPaths;
+use jarvis_core::Vault;
+use jarvis_llm::LlmProvider;
+use jarvis_observer::ObserverService;
+
+pub struct AppState {
+    pub vault: Arc<Vault>,
+    pub config: Config,
+    pub paths: VaultPaths,
+    pub llm: Arc<dyn LlmProvider>,
+    pub observer: tokio::sync::Mutex<ObserverService>,
+}
+
+impl AppState {
+    pub fn new(
+        vault: Arc<Vault>,
+        config: Config,
+        paths: VaultPaths,
+        llm: Arc<dyn LlmProvider>,
+    ) -> Self {
+        let observer = ObserverService::new(vault.clone(), config.clone());
+        Self {
+            vault,
+            config,
+            paths,
+            llm,
+            observer: tokio::sync::Mutex::new(observer),
+        }
+    }
+}

@@ -1,0 +1,33 @@
+[package]
+name = "jarvis-server"
+description = "IPC, HTTP API, and orchestration for PSEUDO-JARVIS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+reqwest.workspace = true
+
+jarvis-core = { path = "../jarvis-core" }
+jarvis-executor = { path = "../jarvis-executor" }
+jarvis-llm = { path = "../jarvis-llm" }
+jarvis-observer = { path = "../jarvis-observer" }
+jarvis-plugin = { path = "../jarvis-plugin" }
+jarvis-replay = { path = "../jarvis-replay" }
+jarvis-scheduler = { path = "../jarvis-scheduler" }
+jarvis-suggester = { path = "../jarvis-suggester" }
+jarvis-sync = { path = "../jarvis-sync" }
+
+[dev-dependencies]
+tempfile = "3"

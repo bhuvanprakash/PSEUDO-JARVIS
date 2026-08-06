@@ -1,0 +1,36 @@
+[package]
+name = "jarvis-cli"
+description = "PSEUDO-JARVIS command-line interface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "jarvis"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+clap.workspace = true
+dialoguer.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+serde_yaml.workspace = true
+
+jarvis-core = { path = "../jarvis-core" }
+jarvis-executor = { path = "../jarvis-executor" }
+jarvis-llm = { path = "../jarvis-llm" }
+jarvis-observer = { path = "../jarvis-observer" }
+jarvis-plugin = { path = "../jarvis-plugin" }
+jarvis-replay = { path = "../jarvis-replay" }
+jarvis-server = { path = "../jarvis-server" }
+jarvis-suggester = { path = "../jarvis-suggester" }
+jarvis-sync = { path = "../jarvis-sync" }
+
+[dev-dependencies]
+tempfile = "3"

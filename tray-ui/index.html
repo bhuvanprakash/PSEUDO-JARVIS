@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PSEUDO-JARVIS Tray</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; background: #0b1020; color: #e8ecff; }
+    h1 { margin-bottom: 0.25rem; }
+    .card { background: #151b2f; border: 1px solid #2a3358; border-radius: 12px; padding: 1rem; margin: 1rem 0; }
+    button { background: #4f7cff; color: white; border: 0; padding: 0.6rem 1rem; border-radius: 8px; cursor: pointer; }
+    input { width: 100%; padding: 0.6rem; border-radius: 8px; border: 1px solid #2a3358; background: #0f1428; color: white; }
+    pre { white-space: pre-wrap; word-break: break-word; }
+  </style>
+</head>
+<body>
+  <h1>PSEUDO-JARVIS</h1>
+  <p>Local tray UI — connects to <code id="api-base"></code></p>
+
+  <div class="card">
+    <h2>Run playbook</h2>
+    <input id="phrase" placeholder='Try "hello jarvis" or playbook id' />
+    <p><button onclick="runPlaybook()">Run</button></p>
+    <pre id="run-output"></pre>
+  </div>
+
+  <div class="card">
+    <h2>Observer status</h2>
+    <button onclick="loadObserver()">Refresh</button>
+    <pre id="observer-output"></pre>
+  </div>
+
+  <div class="card">
+    <h2>Recent runs</h2>
+    <button onclick="loadRuns()">Refresh</button>
+    <pre id="runs-output"></pre>
+  </div>
+
+  <script>
+    const API = 'http://127.0.0.1:9477';
+    document.getElementById('api-base').textContent = API;
+
+    async function runPlaybook() {
+      const phrase = document.getElementById('phrase').value;
+      const res = await fetch(API + '/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phrase })
+      });
+      const json = await res.json();
+      document.getElementById('run-output').textContent = JSON.stringify(json, null, 2);
+    }
+
+    async function loadObserver() {
+      const res = await fetch(API + '/observer/status');
+      const json = await res.json();
+      document.getElementById('observer-output').textContent = JSON.stringify(json, null, 2);
+    }
+
+    async function loadRuns() {
+      const res = await fetch(API + '/runs');
+      const json = await res.json();
+      document.getElementById('runs-output').textContent = JSON.stringify(json, null, 2);
+    }
+
+    loadObserver();
+    loadRuns();
+  </script>
+</body>
+</html>

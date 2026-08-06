@@ -1,0 +1,23 @@
+[package]
+name = "jarvis-executor"
+description = "Sandboxed playbook step execution for PSEUDO-JARVIS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+glob.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+jarvis-core = { path = "../jarvis-core" }
+jarvis-plugin = { path = "../jarvis-plugin" }
+reqwest.workspace = true
