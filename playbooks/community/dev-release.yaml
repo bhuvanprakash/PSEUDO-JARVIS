@@ -1,0 +1,51 @@
+# Example community playbook — not executable until PSEUDO-JARVIS Phase 1 ships.
+# Customize paths and commands for your project before running.
+
+apiVersion: jarvis.dev/v1
+kind: Playbook
+metadata:
+  name: dev-release
+  description: Pull latest, run tests, bump patch version, generate changelog draft
+  tags: [development, release]
+  author: community
+
+spec:
+  triggers:
+    phrases:
+      - "release patch"
+      - "ship it"
+
+  defaults:
+    trust: confirm
+
+  allow_paths:
+    - ~/Projects
+
+  steps:
+    - id: pull
+      name: Pull latest from main
+      type: shell
+      trust: auto
+      command: git pull origin main
+
+    - id: test
+      name: Run test suite
+      type: shell
+      trust: auto
+      depends_on: [pull]
+      command: npm test
+      timeout: 600s
+
+    - id: bump
+      name: Bump patch version
+      type: shell
+      trust: confirm
+      depends_on: [test]
+      command: npm version patch --no-git-tag-version
+
+    - id: changelog
+      name: Draft changelog from git log
+      type: shell
+      trust: auto
+      depends_on: [bump]
+      command: git log $(git describe --tags --abbrev=0)..HEAD --oneline > CHANGELOG.draft.md
