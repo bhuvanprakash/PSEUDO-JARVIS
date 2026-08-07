@@ -1,0 +1,16 @@
+[package]
+name = "jarvis-voice"
+description = "Local voice input/output for PSEUDO-JARVIS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+jarvis-core = { path = "../jarvis-core" }
+jarvis-llm = { path = "../jarvis-llm" }

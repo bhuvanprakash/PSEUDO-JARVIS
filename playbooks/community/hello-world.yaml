@@ -1,0 +1,36 @@
+apiVersion: jarvis.dev/v1
+kind: Playbook
+metadata:
+  name: hello-world
+  description: Minimal smoke-test playbook
+  tags: [demo]
+  author: jarvis
+
+spec:
+  triggers:
+    phrases:
+      - "hello jarvis"
+      - "say hello"
+
+  defaults:
+    trust: auto
+
+  allow_paths:
+    - /tmp
+    - .
+
+  steps:
+    - id: greet
+      name: Print greeting
+      type: shell
+      trust: auto
+      command: echo "Hello from PSEUDO-JARVIS"
+
+    - id: write-file
+      name: Write marker file
+      type: file-write
+      trust: auto
+      depends_on: [greet]
+      config:
+        path: /tmp/jarvis-hello.txt
+        content: "PSEUDO-JARVIS ran successfully at {{ timestamp }}"

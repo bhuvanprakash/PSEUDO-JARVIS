@@ -1,0 +1,45 @@
+apiVersion: jarvis.dev/v1
+kind: Playbook
+metadata:
+  id: weekly-standup-prep
+  name: Weekly Standup Prep
+  version: 1
+  description: Gather git activity and draft standup talking points
+  phrases:
+    - "prep standup"
+    - "weekly standup"
+    - "standup prep"
+spec:
+  trust: confirm
+  allow_paths:
+    - "~"
+  triggers:
+    schedule:
+      - cron: "0 8 * * 1"
+        timezone: local
+  steps:
+    - id: git-summary
+      name: Collect recent git commits
+      type: shell
+      trust: confirm
+      command: |
+        echo "=== Commits (last 7 days) ==="
+        git log --since="7 days ago" --pretty=format:"- %s (%an)" 2>/dev/null | head -20 || echo "No git repo in cwd"
+    - id: draft-notes
+      name: Draft standup notes
+      type: llm-transform
+      trust: confirm
+      config:
+        prompt: |
+          You are a helpful assistant. Turn the git activity below into concise standup talking points:
+          - What I did
+          - What I'm doing next
+          - Blockers (if any)
+          Keep it under 150 words, bullet format.
+        input: "{{ steps.git-summary.stdout }}"
+        output_path: "~/.jarvis/standup-notes.md"
+    - id: notify
+      name: Show where notes were saved
+      type: shell
+      trust: auto
+      command: echo "Standup notes saved to ~/.jarvis/standup-notes.md"

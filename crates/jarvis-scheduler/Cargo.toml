@@ -1,0 +1,18 @@
+[package]
+name = "jarvis-scheduler"
+description = "Cron scheduler for PSEUDO-JARVIS playbooks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+cron.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-cron-scheduler.workspace = true
+tracing.workspace = true
+
+jarvis-core = { path = "../jarvis-core" }

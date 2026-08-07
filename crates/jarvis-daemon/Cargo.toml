@@ -1,0 +1,23 @@
+[package]
+name = "jarvis-daemon"
+description = "PSEUDO-JARVIS background daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "jarvisd"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+jarvis-core = { path = "../jarvis-core" }
+jarvis-llm = { path = "../jarvis-llm" }
+jarvis-observer = { path = "../jarvis-observer" }
+jarvis-plugin = { path = "../jarvis-plugin" }
+jarvis-server = { path = "../jarvis-server" }

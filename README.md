@@ -157,45 +157,79 @@ Full design: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
 
 ## Project status
 
-**Phase 0 — Design** (current)
+**Phase 1–5 implemented** — core engine, observer, suggester, HTTP tray UI, plugins, sync, scheduler, messaging.
 
-We are defining architecture, trust model, and MVP scope before writing application code. Follow this repo for updates.
+### Build from source
+
+```bash
+# Requires Rust stable (1.85+)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+git clone https://github.com/bhuvanprakash/PSEUDO-JARVIS.git
+cd PSEUDO-JARVIS
+cargo build --release
+```
+
+Binaries:
+- `target/release/jarvis` — CLI
+- `target/release/jarvisd` — background daemon
+
+### Quick start
+
+```bash
+# 1. Initialize vault (~/.jarvis by default)
+jarvis init
+
+# 2. List community playbooks
+jarvis playbook list
+
+# 3. Run by name or phrase
+jarvis run hello-world --yes
+jarvis run --phrase "hello jarvis"
+
+# 4. Start daemon (observer + HTTP API on :9477)
+jarvisd --foreground
+
+# 5. Open tray UI (served separately)
+# Open tray-ui/index.html in your browser while jarvisd is running
+```
+
+### CLI reference
+
+| Command | Description |
+|---------|-------------|
+| `jarvis init` | Create vault, config, import community playbooks |
+| `jarvis run <id> [--yes]` | Execute a playbook |
+| `jarvis run --phrase "..."` | Match playbook by trigger phrase |
+| `jarvis playbook list/show/validate/import` | Manage playbooks |
+| `jarvis observe enable --path ~/Projects` | Watch directories |
+| `jarvis observe event --command "git status"` | Record terminal event |
+| `jarvis suggest scan` | Mine patterns from observed events |
+| `jarvis replay list/show/export` | Audit trail |
+| `jarvis plugin list` | Installed plugins |
+| `jarvis sync export/import` | Vault snapshot sync (optional AES-256-GCM encryption) |
+| `jarvis trust list/grant/revoke` | Manage trust ladder grants |
+| `jarvis voice run/listen/speak` | Phrase shortcut, STT listen, local TTS |
+| `jarvisd` | Run daemon (IPC + HTTP + scheduler) |
 
 ### Roadmap
 
-| Phase | Milestone | Target outcome |
-|-------|-----------|----------------|
-| **0** | Design docs + community feedback | Architecture signed off |
-| **1** | MVP — `observe` + manual playbooks | Run 1 playbook from CLI with confirm gate |
-| **2** | Pattern suggester | "This looks like a playbook — save it?" |
-| **3** | Voice + tray app | "Hey JARVIS, do the Friday thing" |
-| **4** | Community playbook registry | Share templates, import safely |
-| **5** | Plugins | Gmail, Notion, Jira, Home Assistant |
+| Phase | Milestone | Status |
+|-------|-----------|--------|
+| **0** | Design docs + community feedback | ✅ Done |
+| **1** | MVP — observe + manual playbooks | ✅ Done |
+| **2** | Pattern suggester | ✅ Done |
+| **3** | Voice phrase + tray web UI | ✅ Done |
+| **4** | Community playbooks + plugins | ✅ Done |
+| **5** | Vault sync export/import | ✅ Done |
 
 ### MVP scope (Phase 1)
 
-Ship the smallest thing that proves the magic:
-
-- [ ] `jarvis observe` — terminal + file watcher in allowed dirs  
-- [ ] `jarvis playbook run <name>` — execute YAML playbooks  
-- [ ] Trust ladder with `confirm` default on destructive actions  
-- [ ] Replay log written to `~/.jarvis/replays/`  
-- [ ] Ollama integration for natural-language trigger → playbook mapping  
-- [ ] Zero network calls by default (enforced in CI)
-
-**Explicitly out of MVP:** screen recording, auto-extraction, Telegram, plugins.
-
-## Getting started (coming soon)
-
-```bash
-# Future install (not yet available)
-curl -fsSL https://pseudo-jarvis.dev/install.sh | sh
-jarvis init
-jarvis observe --allow ~/Projects/acme
-jarvis playbook run monthly-close
-```
-
-Until Phase 1 ships, read the architecture doc and open a Discussion if you want to help shape the design.
+- [x] `jarvis observe` — terminal + file watcher in allowed dirs  
+- [x] `jarvis playbook run <name>` — execute YAML playbooks  
+- [x] Trust ladder with `confirm` default on destructive actions  
+- [x] Replay log written to `~/.jarvis/replays/`  
+- [x] Ollama integration for natural-language trigger → playbook mapping  
+- [x] Zero network calls by default (LLM/messaging opt-in)
 
 ## Use cases
 
@@ -214,16 +248,14 @@ Until Phase 1 ships, read the architecture doc and open a Discussion if you want
 
 ## Contributing
 
-We are in design phase. The highest-value contributions right now:
+Contributions welcome:
 
-- Feedback on the [architecture](docs/ARCHITECTURE.md)  
-- Playbook template ideas (YAML examples for real workflows)  
-- Security review of the trust model  
-- Platform expertise (macOS ScreenCaptureKit, Linux Wayland, Windows UI Automation)
+- Playbook templates in `playbooks/community/`
+- Security review of the trust model
+- Platform expertise (macOS, Linux, Windows)
+- See [architecture](docs/ARCHITECTURE.md) for design details
 
-Open an Issue or Discussion. Code contributions welcome once Phase 1 scaffolding lands.
-
-## Community playbooks (planned)
+## Community playbooks
 
 Share workflows without sharing data:
 
