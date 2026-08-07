@@ -67,6 +67,8 @@ pub struct ObserverConfig {
     pub filesystem: FilesystemObserverConfig,
     #[serde(default)]
     pub screen: ScreenObserverConfig,
+    #[serde(default)]
+    pub calendar: CalendarObserverConfig,
     #[serde(default = "default_retention")]
     pub retention_days: u32,
 }
@@ -92,6 +94,7 @@ impl Default for ObserverConfig {
             terminal: TerminalObserverConfig::default(),
             filesystem: FilesystemObserverConfig::default(),
             screen: ScreenObserverConfig::default(),
+            calendar: CalendarObserverConfig::default(),
             retention_days: default_retention(),
         }
     }
@@ -152,6 +155,14 @@ pub struct ScreenObserverConfig {
     pub enabled: bool,
     #[serde(default)]
     pub apps: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CalendarObserverConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub ics_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -31,6 +31,7 @@ jarvis-replay = { path = "../jarvis-replay" }
 jarvis-server = { path = "../jarvis-server" }
 jarvis-suggester = { path = "../jarvis-suggester" }
 jarvis-sync = { path = "../jarvis-sync" }
+jarvis-voice = { path = "../jarvis-voice" }
 
 [dev-dependencies]
 tempfile = "3"

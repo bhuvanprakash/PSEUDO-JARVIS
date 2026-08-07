@@ -5,66 +5,224 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PSEUDO-JARVIS Tray</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 2rem; background: #0b1020; color: #e8ecff; }
-    h1 { margin-bottom: 0.25rem; }
-    .card { background: #151b2f; border: 1px solid #2a3358; border-radius: 12px; padding: 1rem; margin: 1rem 0; }
-    button { background: #4f7cff; color: white; border: 0; padding: 0.6rem 1rem; border-radius: 8px; cursor: pointer; }
-    input { width: 100%; padding: 0.6rem; border-radius: 8px; border: 1px solid #2a3358; background: #0f1428; color: white; }
-    pre { white-space: pre-wrap; word-break: break-word; }
+    :root {
+      --bg: #0a0e1a;
+      --surface: #121829;
+      --border: #2a3358;
+      --accent: #5b8cff;
+      --accent-dim: #3d5faa;
+      --text: #e8ecff;
+      --muted: #8b93b8;
+      --success: #3dd68c;
+      --warn: #f5a623;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      padding: 1.5rem 2rem;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(135deg, #121829 0%, #0f1628 100%);
+    }
+    header h1 { margin: 0; font-size: 1.5rem; letter-spacing: 0.02em; }
+    header p { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.9rem; }
+    main { padding: 1.5rem 2rem; max-width: 960px; }
+    .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.1rem 1.25rem;
+    }
+    .card h2 { margin: 0 0 0.75rem; font-size: 1rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    button, .btn {
+      background: var(--accent);
+      color: white;
+      border: 0;
+      padding: 0.55rem 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.9rem;
+      margin-right: 0.4rem;
+      margin-bottom: 0.4rem;
+    }
+    button:hover { background: var(--accent-dim); }
+    button.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    button.danger { background: #c44; }
+    input, select {
+      width: 100%;
+      padding: 0.65rem 0.75rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      margin-bottom: 0.6rem;
+    }
+    pre, .output {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem;
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 200px;
+      overflow: auto;
+      margin: 0.5rem 0 0;
+    }
+    .status-pill {
+      display: inline-block;
+      padding: 0.2rem 0.55rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      background: #1e2a4a;
+      margin-right: 0.35rem;
+    }
+    .status-pill.ok { background: #1a3d2e; color: var(--success); }
+    .status-pill.warn { background: #3d301a; color: var(--warn); }
+    ul.playbooks { list-style: none; padding: 0; margin: 0; }
+    ul.playbooks li {
+      padding: 0.45rem 0;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    ul.playbooks li:hover { color: var(--accent); }
+    .row { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
   </style>
 </head>
 <body>
-  <h1>PSEUDO-JARVIS</h1>
-  <p>Local tray UI — connects to <code id="api-base"></code></p>
+  <header>
+    <h1>PSEUDO-JARVIS</h1>
+    <p>Local ambient playbooks — <code id="api-base"></code></p>
+  </header>
 
-  <div class="card">
-    <h2>Run playbook</h2>
-    <input id="phrase" placeholder='Try "hello jarvis" or playbook id' />
-    <p><button onclick="runPlaybook()">Run</button></p>
-    <pre id="run-output"></pre>
-  </div>
+  <main>
+    <div class="grid">
+      <section class="card" style="grid-column: 1 / -1">
+        <h2>Run playbook</h2>
+        <input id="phrase" placeholder='Try "hello jarvis" or a playbook id' />
+        <div class="row">
+          <button onclick="runPlaybook()">Run</button>
+          <button class="secondary" onclick="loadPlaybooks()">Refresh playbooks</button>
+        </div>
+        <pre id="run-output"></pre>
+      </section>
 
-  <div class="card">
-    <h2>Observer status</h2>
-    <button onclick="loadObserver()">Refresh</button>
-    <pre id="observer-output"></pre>
-  </div>
+      <section class="card">
+        <h2>Playbooks</h2>
+        <ul class="playbooks" id="playbook-list"><li>Loading…</li></ul>
+      </section>
 
-  <div class="card">
-    <h2>Recent runs</h2>
-    <button onclick="loadRuns()">Refresh</button>
-    <pre id="runs-output"></pre>
-  </div>
+      <section class="card">
+        <h2>Observer</h2>
+        <div id="observer-badges" class="row"></div>
+        <div class="row" style="margin-top: 0.5rem">
+          <button class="secondary" onclick="pauseObserver()">Pause</button>
+          <button class="secondary" onclick="resumeObserver()">Resume</button>
+          <button class="danger" onclick="enableKillSwitch()">Kill switch</button>
+        </div>
+        <pre id="observer-output"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Recent runs</h2>
+        <button class="secondary" onclick="loadRuns()">Refresh</button>
+        <pre id="runs-output"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Trust grants</h2>
+        <button class="secondary" onclick="loadTrust()">Refresh</button>
+        <pre id="trust-output"></pre>
+      </section>
+    </div>
+  </main>
 
   <script>
-    const API = 'http://127.0.0.1:9477';
+    const API = window.location.origin.includes('9477') ? window.location.origin : 'http://127.0.0.1:9477';
     document.getElementById('api-base').textContent = API;
 
-    async function runPlaybook() {
-      const phrase = document.getElementById('phrase').value;
-      const res = await fetch(API + '/run', {
+    async function api(path, opts) {
+      const res = await fetch(API + path, opts);
+      return res.json();
+    }
+
+    async function runPlaybook(id) {
+      const phrase = id || document.getElementById('phrase').value;
+      const body = id ? { playbook_id: id } : { phrase };
+      const json = await api('/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phrase })
+        body: JSON.stringify(body)
       });
-      const json = await res.json();
       document.getElementById('run-output').textContent = JSON.stringify(json, null, 2);
     }
 
+    async function loadPlaybooks() {
+      const json = await api('/playbooks');
+      const list = document.getElementById('playbook-list');
+      list.innerHTML = '';
+      (json.data || []).forEach(id => {
+        const li = document.createElement('li');
+        li.textContent = id;
+        li.onclick = () => runPlaybook(id);
+        list.appendChild(li);
+      });
+      if (!list.children.length) list.innerHTML = '<li>No playbooks</li>';
+    }
+
     async function loadObserver() {
-      const res = await fetch(API + '/observer/status');
-      const json = await res.json();
-      document.getElementById('observer-output').textContent = JSON.stringify(json, null, 2);
+      const json = await api('/observer/status');
+      document.getElementById('observer-output').textContent = JSON.stringify(json.data, null, 2);
+      const badges = document.getElementById('observer-badges');
+      const d = json.data || {};
+      badges.innerHTML = [
+        ['enabled', d.enabled],
+        ['paused', d.paused],
+        ['killed', d.killed],
+        ['filesystem', d.filesystem],
+        ['calendar', d.calendar],
+      ].map(([k, v]) => `<span class="status-pill ${v ? 'ok' : ''}">${k}: ${v}</span>`).join('');
+    }
+
+    async function pauseObserver() {
+      await api('/observer/pause', { method: 'POST' });
+      loadObserver();
+    }
+
+    async function resumeObserver() {
+      await api('/observer/resume', { method: 'POST' });
+      loadObserver();
+    }
+
+    async function enableKillSwitch() {
+      if (!confirm('Enable kill switch? This stops the observer until disabled via CLI.')) return;
+      await api('/observer/killswitch/enable', { method: 'POST' });
+      loadObserver();
     }
 
     async function loadRuns() {
-      const res = await fetch(API + '/runs');
-      const json = await res.json();
-      document.getElementById('runs-output').textContent = JSON.stringify(json, null, 2);
+      const json = await api('/runs');
+      const runs = json.data || [];
+      const lines = runs.slice(0, 10).map(r => `${r.id?.slice(0,8)}…  ${r.playbook_id}  ${r.status}`).join('\n');
+      document.getElementById('runs-output').textContent = lines || 'No runs yet';
     }
 
+    async function loadTrust() {
+      const json = await api('/trust');
+      document.getElementById('trust-output').textContent = JSON.stringify(json.data, null, 2);
+    }
+
+    loadPlaybooks();
     loadObserver();
     loadRuns();
+    loadTrust();
   </script>
 </body>
 </html>

@@ -3,12 +3,14 @@ use std::sync::Arc;
 use jarvis_core::paths::expand_tilde;
 use jarvis_core::{Config, Vault};
 
+use crate::calendar::CalendarWatcher;
 use crate::filesystem::FilesystemWatcher;
 
 pub struct ObserverService {
-  vault: Arc<Vault>,
-  config: Config,
-  filesystem: Option<FilesystemWatcher>,
+    vault: Arc<Vault>,
+    config: Config,
+    filesystem: Option<FilesystemWatcher>,
+    calendar: Option<CalendarWatcher>,
 }
 
 impl ObserverService {
@@ -17,6 +19,7 @@ impl ObserverService {
             vault,
             config,
             filesystem: None,
+            calendar: None,
         }
     }
 
@@ -39,6 +42,12 @@ impl ObserverService {
                 &self.config.observer.filesystem,
             )?);
         }
+        if self.config.observer.calendar.enabled && !self.config.observer.calendar.ics_paths.is_empty() {
+            self.calendar = Some(CalendarWatcher::start(
+                self.vault.clone(),
+                self.config.observer.calendar.ics_paths.clone(),
+            )?);
+        }
         Ok(())
     }
 
@@ -51,6 +60,8 @@ impl ObserverService {
             "filesystem": self.config.observer.filesystem.enabled,
             "watch_paths": self.config.observer.filesystem.watch,
             "screen": self.config.observer.screen.enabled,
+            "calendar": self.config.observer.calendar.enabled,
+            "calendar_paths": self.config.observer.calendar.ics_paths,
         })
     }
 

@@ -4,20 +4,22 @@ use std::path::Path;
 use dialoguer::Confirm;
 use jarvis_core::paths::{write_auth_token, VaultPaths};
 use jarvis_core::playbook::load_playbook;
-use jarvis_core::types::{ConfirmRequest, ConfirmResponse};
+use jarvis_core::types::{ConfirmRequest, ConfirmResponse, TrustGrant, TrustLevel};
 use jarvis_core::{Config, Vault};
 use jarvis_observer::record_terminal_event;
 use jarvis_observer::filesystem::install_shell_hook;
-use jarvis_plugin::install_builtin_slack_plugin;
+use jarvis_plugin::install_builtin_plugins;
 use jarvis_replay::{export_markdown, load_manifest, load_steps, prune_replays};
 use jarvis_server::ipc::{ipc_call, IpcRequest};
 use jarvis_server::orchestrator::{ConfirmCallback, Orchestrator, RunOptions};
 use jarvis_suggester::PatternSuggester;
 use jarvis_sync::VaultSync;
 
+use jarvis_voice::{record_microphone, speak_local, transcribe_file};
+
 use crate::{
     load_state, ObserveCommands, PlaybookCommands, PluginCommands, ReplayCommands, SuggestCommands,
-    SyncCommands,
+    SyncCommands, TrustCommands, VoiceCommands,
 };
 
 pub async fn init(vault: Option<String>) -> anyhow::Result<()> {
@@ -32,7 +34,7 @@ pub async fn init(vault: Option<String>) -> anyhow::Result<()> {
         copy_dir_all(community_src, &paths.community_playbooks())?;
     }
 
-    install_builtin_slack_plugin(&paths.plugins())?;
+    install_builtin_plugins(&paths.plugins())?;
 
     let tray_src = Path::new("tray-ui");
     if tray_src.exists() {
@@ -252,7 +254,7 @@ pub async fn plugin(cmd: PluginCommands, vault: Option<String>) -> anyhow::Resul
             }
         }
         PluginCommands::Enable { name } => {
-            install_builtin_slack_plugin(&paths.plugins())?;
+            install_builtin_plugins(&paths.plugins())?;
             println!("Plugin '{name}' available at {}", paths.plugins().join(&name).display());
         }
     }
@@ -268,18 +270,80 @@ pub async fn sync(cmd: SyncCommands, vault: Option<String>) -> anyhow::Result<()
         .clone()
         .map(PathBuf::from)
         .unwrap_or_else(|| paths.root.join("sync"));
-    let sync = VaultSync::new(paths.clone(), sync_dir);
     match cmd {
-        SyncCommands::Export => {
+        SyncCommands::Export { passphrase } => {
+            let pass = passphrase.or_else(|| state.config.sync.passphrase.clone());
+            let sync = VaultSync::new(paths.clone(), sync_dir, pass);
             let archive = sync.export_snapshot()?;
             println!("Exported vault snapshot to {}", archive.display());
         }
-        SyncCommands::Import { archive } => {
+        SyncCommands::Import { archive, passphrase } => {
+            let pass = passphrase.or_else(|| state.config.sync.passphrase.clone());
+            let sync = VaultSync::new(paths.clone(), sync_dir, pass);
             sync.import_snapshot(&archive)?;
             println!("Imported vault snapshot from {}", archive.display());
         }
     }
     Ok(())
+}
+
+pub async fn trust(cmd: TrustCommands, vault: Option<String>) -> anyhow::Result<()> {
+    let (state, _paths) = load_state(vault)?;
+    match cmd {
+        TrustCommands::List => {
+            let grants = state.vault.list_trust_grants()?;
+            if grants.is_empty() {
+                println!("No trust grants. Default trust level applies per playbook.");
+            } else {
+                for g in grants {
+                    println!(
+                        "{} / {} -> {} (since {})",
+                        g.playbook_id, g.step_id, g.level, g.granted_at
+                    );
+                }
+            }
+        }
+        TrustCommands::Grant {
+            playbook,
+            level,
+            step,
+        } => {
+            let level: TrustLevel = level.parse().map_err(anyhow::Error::msg)?;
+            let step_id = step.unwrap_or_else(|| "*".to_string());
+            let grant = TrustGrant {
+                playbook_id: playbook.clone(),
+                step_id: step_id.clone(),
+                level,
+                granted_at: chrono::Utc::now().to_rfc3339(),
+            };
+            state.vault.set_trust_grant(&grant)?;
+            println!("Granted {level} trust for {playbook}/{step_id}");
+        }
+        TrustCommands::Revoke { playbook, step } => {
+            let n = state.vault.delete_trust_grant(&playbook, step.as_deref())?;
+            println!("Revoked {n} trust grant(s) for {playbook}");
+        }
+    }
+    Ok(())
+}
+
+pub async fn voice(cmd: VoiceCommands, vault: Option<String>) -> anyhow::Result<()> {
+    match cmd {
+        VoiceCommands::Run { phrase } => run(None, Some(phrase), false, vault).await,
+        VoiceCommands::Listen { seconds } => {
+            let listen_paths = VaultPaths::from_env_or_default(vault.as_deref());
+            let path = listen_paths.root.join("tmp-listen.wav");
+            record_microphone(&path, seconds).await?;
+            let text = transcribe_file(&path).await?;
+            println!("Heard: {text}");
+            run(None, Some(text), false, vault).await
+        }
+        VoiceCommands::Speak { text } => {
+            speak_local(&text).await?;
+            println!("Spoke: {text}");
+            Ok(())
+        }
+    }
 }
 
 pub async fn status(vault: Option<String>) -> anyhow::Result<()> {

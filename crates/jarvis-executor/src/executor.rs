@@ -22,6 +22,9 @@ pub struct ExecutionContext {
     pub allow_paths: Vec<String>,
     pub vars: VariableContext,
     pub backup_dir: std::path::PathBuf,
+    pub llm_enabled: bool,
+    pub llm_endpoint: String,
+    pub llm_model: String,
 }
 
 #[derive(Debug, Clone)]

@@ -69,9 +69,15 @@ enum Commands {
         #[command(subcommand)]
         cmd: SyncCommands,
     },
-    /// Voice trigger (Phase 3) — text phrase shortcut
+    /// Voice: run by phrase, listen, or speak
     Voice {
-        phrase: String,
+        #[command(subcommand)]
+        cmd: VoiceCommands,
+    },
+    /// Trust ladder management
+    Trust {
+        #[command(subcommand)]
+        cmd: TrustCommands,
     },
     /// Daemon status via IPC
     Status,
@@ -138,8 +144,48 @@ enum PluginCommands {
 
 #[derive(Subcommand)]
 enum SyncCommands {
-    Export,
-    Import { archive: PathBuf },
+    Export {
+        #[arg(long, env = "JARVIS_SYNC_PASSPHRASE")]
+        passphrase: Option<String>,
+    },
+    Import {
+        archive: PathBuf,
+        #[arg(long, env = "JARVIS_SYNC_PASSPHRASE")]
+        passphrase: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum VoiceCommands {
+    /// Run a playbook by natural-language phrase
+    Run { phrase: String },
+    /// Record and transcribe speech (requires whisper + recorder)
+    Listen {
+        #[arg(long, default_value_t = 5)]
+        seconds: u32,
+    },
+    /// Speak text aloud (requires espeak, spd-say, or say)
+    Speak { text: String },
+}
+
+#[derive(Subcommand)]
+enum TrustCommands {
+    /// List trust grants
+    List,
+    /// Grant trust for a playbook or step
+    Grant {
+        playbook: String,
+        #[arg(long, default_value = "auto")]
+        level: String,
+        #[arg(long)]
+        step: Option<String>,
+    },
+    /// Revoke trust for a playbook (optionally one step)
+    Revoke {
+        playbook: String,
+        #[arg(long)]
+        step: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -160,7 +206,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Suggest { cmd } => commands::suggest(cmd, cli.vault).await,
         Commands::Plugin { cmd } => commands::plugin(cmd, cli.vault).await,
         Commands::Sync { cmd } => commands::sync(cmd, cli.vault).await,
-        Commands::Voice { phrase } => commands::run(None, Some(phrase), false, cli.vault).await,
+        Commands::Voice { cmd } => commands::voice(cmd, cli.vault).await,
+        Commands::Trust { cmd } => commands::trust(cmd, cli.vault).await,
         Commands::Status => commands::status(cli.vault).await,
         Commands::Daemon => commands::daemon(cli.vault).await,
     }

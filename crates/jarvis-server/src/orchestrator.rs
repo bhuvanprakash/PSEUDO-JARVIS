@@ -149,6 +149,9 @@ impl Orchestrator {
                 allow_paths: playbook.doc.spec.allow_paths.clone(),
                 vars: vars.clone(),
                 backup_dir: backup_dir.clone(),
+                llm_enabled: state.config.llm.enabled,
+                llm_endpoint: state.config.llm.endpoint.clone(),
+                llm_model: state.config.llm.model.clone(),
             };
 
             let started = chrono::Utc::now().to_rfc3339();

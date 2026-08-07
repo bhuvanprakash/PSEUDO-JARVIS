@@ -365,6 +365,40 @@ impl Vault {
         .map_err(|e| JarvisError::Vault(format!("trust grant: {e}")))
     }
 
+    pub fn list_trust_grants(&self) -> Result<Vec<TrustGrant>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT playbook_id, step_id, level, granted_at FROM trust_grants ORDER BY playbook_id, step_id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let level: String = row.get(2)?;
+            Ok(TrustGrant {
+                playbook_id: row.get(0)?,
+                step_id: row.get(1)?,
+                level: level.parse().map_err(|e: String| rusqlite::Error::InvalidParameterName(e))?,
+                granted_at: row.get(3)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| JarvisError::Vault(format!("list trust grants: {e}")))
+    }
+
+    pub fn delete_trust_grant(&self, playbook_id: &str, step_id: Option<&str>) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        let n = if let Some(step) = step_id {
+            conn.execute(
+                "DELETE FROM trust_grants WHERE playbook_id = ?1 AND step_id = ?2",
+                params![playbook_id, step],
+            )?
+        } else {
+            conn.execute(
+                "DELETE FROM trust_grants WHERE playbook_id = ?1",
+                params![playbook_id],
+            )?
+        };
+        Ok(n)
+    }
+
     pub fn upsert_pattern(&self, pattern: &PatternRecord) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(

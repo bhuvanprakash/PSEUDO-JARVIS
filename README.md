@@ -206,8 +206,9 @@ jarvisd --foreground
 | `jarvis suggest scan` | Mine patterns from observed events |
 | `jarvis replay list/show/export` | Audit trail |
 | `jarvis plugin list` | Installed plugins |
-| `jarvis sync export/import` | Vault snapshot sync |
-| `jarvis voice "do the friday thing"` | Phrase shortcut |
+| `jarvis sync export/import` | Vault snapshot sync (optional AES-256-GCM encryption) |
+| `jarvis trust list/grant/revoke` | Manage trust ladder grants |
+| `jarvis voice run/listen/speak` | Phrase shortcut, STT listen, local TTS |
 | `jarvisd` | Run daemon (IPC + HTTP + scheduler) |
 
 ### Roadmap

@@ -6,6 +6,7 @@ use glob::glob;
 use jarvis_core::error::JarvisError;
 use jarvis_core::paths::{path_allowed, resolve_path};
 use jarvis_core::playbook::{PlaybookStep, StepType};
+use jarvis_llm::{CompleteOpts, LlmProvider, OllamaProvider};
 use serde_json::json;
 use tokio::process::Command;
 use tokio::time::timeout;
@@ -335,12 +336,48 @@ pub async fn run_llm_transform(
         .and_then(|v| v.as_str())
         .unwrap_or("");
     let full_prompt = format!("{prompt}\n\nInput:\n{input}");
+
+    let result_text = if ctx.llm_enabled {
+        let provider = OllamaProvider::new(&ctx.llm_endpoint);
+        provider
+            .complete(
+                &full_prompt,
+                CompleteOpts {
+                    model: ctx.llm_model.clone(),
+                    temperature: 0.3,
+                },
+            )
+            .await
+            .unwrap_or_else(|e| format!("LLM error: {e}"))
+    } else {
+        format!("[LLM disabled] would process: {}", full_prompt.len())
+    };
+
+    if let Some(out_path) = config.get("output_path").and_then(|v| v.as_str()) {
+        let path = resolve_path(&ctx.vars.interpolate(out_path));
+        ensure_allowed(&path, &ctx.allow_paths)?;
+        backup_file(&ctx.backup_dir, &path)?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&path, &result_text)?;
+        return Ok(ExecutionResult {
+            output: StepOutput {
+                success: true,
+                stdout: result_text.clone(),
+                stderr: String::new(),
+                data: json!({ "output_path": path.display().to_string() }),
+            },
+            files_changed: vec![path.display().to_string()],
+        });
+    }
+
     Ok(ExecutionResult {
         output: StepOutput {
             success: true,
-            stdout: format!("LLM transform queued (prompt length {})", full_prompt.len()),
+            stdout: result_text.clone(),
             stderr: String::new(),
-            data: json!({ "prompt": full_prompt }),
+            data: json!({ "result": result_text }),
         },
         files_changed: Vec::new(),
     })

@@ -19,5 +19,6 @@ tracing.workspace = true
 uuid.workspace = true
 
 jarvis-core = { path = "../jarvis-core" }
+jarvis-llm = { path = "../jarvis-llm" }
 jarvis-plugin = { path = "../jarvis-plugin" }
 reqwest.workspace = true

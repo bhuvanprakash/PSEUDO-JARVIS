@@ -5,7 +5,7 @@ use clap::Parser;
 use jarvis_core::paths::{read_auth_token, write_auth_token, VaultPaths};
 use jarvis_core::{Config, Vault};
 use jarvis_llm::ollama::create_provider;
-use jarvis_plugin::install_builtin_slack_plugin;
+use jarvis_plugin::install_builtin_plugins;
 use jarvis_server::{http, ipc, messaging, scheduler, AppState};
 use tracing_subscriber::EnvFilter;
 
@@ -54,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
 
     let vault = Arc::new(Vault::open(paths.clone())?);
     vault.sync_playbooks()?;
-    install_builtin_slack_plugin(&paths.plugins())?;
+    install_builtin_plugins(&paths.plugins())?;
 
     let llm: Arc<dyn jarvis_llm::LlmProvider> = Arc::from(create_provider(
         config.llm.enabled,
@@ -89,8 +89,8 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    if config.messaging.telegram_token.is_some() {
-        messaging::start_telegram_bot(state.clone()).await?;
+    if config.messaging.telegram_token.is_some() || config.messaging.discord_token.is_some() {
+        messaging::start_messaging_bots(state.clone()).await?;
     }
 
     if config.sync.enabled {
