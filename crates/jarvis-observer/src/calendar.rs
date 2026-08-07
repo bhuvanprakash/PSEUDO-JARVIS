@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -14,12 +15,13 @@ pub struct CalendarWatcher {
 impl CalendarWatcher {
     pub fn start(vault: Arc<Vault>, ics_paths: Vec<String>) -> jarvis_core::Result<Self> {
         let handle = tokio::spawn(async move {
+            let mut seen = HashSet::new();
             loop {
                 for path_str in &ics_paths {
                     let path = jarvis_core::paths::resolve_path(path_str);
                     if path.exists() {
                         if let Ok(content) = fs::read_to_string(&path) {
-                            scan_ics(&vault, &content);
+                            scan_ics(&vault, &content, path_str, &mut seen);
                         }
                     }
                 }
@@ -30,14 +32,19 @@ impl CalendarWatcher {
     }
 }
 
-fn scan_ics(vault: &Vault, content: &str) {
+fn scan_ics(vault: &Vault, content: &str, source_path: &str, seen: &mut HashSet<String>) {
     for line in content.lines() {
         if let Some(summary) = line.strip_prefix("SUMMARY:") {
+            let title = summary.trim();
+            let key = format!("{source_path}:{title}");
+            if !seen.insert(key) {
+                continue;
+            }
             let event = ObservedEvent {
                 ts: chrono::Utc::now().to_rfc3339(),
                 source: "calendar".into(),
                 kind: "event".into(),
-                payload: json!({ "title": summary.trim() }),
+                payload: json!({ "title": title, "ics": source_path }),
                 session_id: None,
                 redacted: false,
             };

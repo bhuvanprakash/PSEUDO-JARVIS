@@ -1,4 +1,6 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use jarvis_core::paths::expand_tilde;
 use jarvis_core::{Config, Vault};
@@ -11,6 +13,8 @@ pub struct ObserverService {
     config: Config,
     filesystem: Option<FilesystemWatcher>,
     calendar: Option<CalendarWatcher>,
+    kill_cached: AtomicBool,
+    kill_checked_at: std::sync::Mutex<Instant>,
 }
 
 impl ObserverService {
@@ -20,6 +24,8 @@ impl ObserverService {
             config,
             filesystem: None,
             calendar: None,
+            kill_cached: AtomicBool::new(false),
+            kill_checked_at: std::sync::Mutex::new(Instant::now() - Duration::from_secs(60)),
         }
     }
 
@@ -28,15 +34,35 @@ impl ObserverService {
     }
 
     pub fn is_killed(&self) -> bool {
+        let mut checked = self.kill_checked_at.lock().unwrap();
+        if checked.elapsed() < Duration::from_secs(2) {
+            return self.kill_cached.load(Ordering::Relaxed);
+        }
         let kill_path = expand_tilde(&self.config.observer.kill_switch_file);
-        kill_path.exists()
+        let killed = kill_path.exists();
+        self.kill_cached.store(killed, Ordering::Relaxed);
+        *checked = Instant::now();
+        killed
+    }
+
+    pub fn set_paused(&mut self, paused: bool) -> jarvis_core::Result<()> {
+        self.config.observer.paused = paused;
+        if paused {
+            self.filesystem = None;
+            self.calendar = None;
+        } else if self.config.observer.enabled && !self.is_killed() {
+            self.start()?;
+        }
+        Ok(())
     }
 
     pub fn start(&mut self) -> jarvis_core::Result<()> {
         if !self.config.observer.enabled || self.is_paused() || self.is_killed() {
             return Ok(());
         }
-        if self.config.observer.filesystem.enabled {
+        if self.config.observer.filesystem.enabled
+            && !self.config.observer.filesystem.watch.is_empty()
+        {
             self.filesystem = Some(FilesystemWatcher::start(
                 self.vault.clone(),
                 &self.config.observer.filesystem,

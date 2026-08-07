@@ -8,7 +8,7 @@ use jarvis_core::types::{ConfirmRequest, ConfirmResponse, TrustGrant, TrustLevel
 use jarvis_core::{Config, Vault};
 use jarvis_observer::record_terminal_event;
 use jarvis_observer::filesystem::install_shell_hook;
-use jarvis_plugin::install_builtin_plugins;
+use jarvis_plugin::{install_builtin_plugins, install_builtin_plugins_if_missing};
 use jarvis_replay::{export_markdown, load_manifest, load_steps, prune_replays};
 use jarvis_server::ipc::{ipc_call, IpcRequest};
 use jarvis_server::orchestrator::{ConfirmCallback, Orchestrator, RunOptions};
@@ -34,7 +34,7 @@ pub async fn init(vault: Option<String>) -> anyhow::Result<()> {
         copy_dir_all(community_src, &paths.community_playbooks())?;
     }
 
-    install_builtin_plugins(&paths.plugins())?;
+    install_builtin_plugins_if_missing(&paths.plugins())?;
 
     let tray_src = Path::new("tray-ui");
     if tray_src.exists() {
@@ -122,6 +122,7 @@ pub async fn playbook(cmd: PlaybookCommands, vault: Option<String>) -> anyhow::R
             let dest = paths.playbooks().join(format!("{}.yaml", pb.id()));
             fs::copy(&path, &dest)?;
             state.vault.sync_playbooks()?;
+            state.vault.invalidate_playbook_cache();
             println!("Imported {} -> {}", pb.id(), dest.display());
         }
     }

@@ -1,12 +1,14 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use jarvis_core::paths::resolve_path;
 use jarvis_core::Vault;
 use notify::{Config as NotifyConfig, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 
-use crate::events::record_filesystem_event;
+use crate::events::record_filesystem_events_batch;
 
 pub struct FilesystemWatcher {
     _watcher: RecommendedWatcher,
@@ -17,11 +19,11 @@ impl FilesystemWatcher {
         vault: Arc<Vault>,
         config: &jarvis_core::config::FilesystemObserverConfig,
     ) -> jarvis_core::Result<Self> {
-        let (tx, mut rx) = mpsc::channel(256);
+        let (tx, mut rx) = mpsc::channel(1024);
         let mut watcher = RecommendedWatcher::new(
             move |res: Result<Event, notify::Error>| {
                 if let Ok(event) = res {
-                    let _ = tx.blocking_send(event);
+                    let _ = tx.try_send(event);
                 }
             },
             NotifyConfig::default(),
@@ -39,25 +41,49 @@ impl FilesystemWatcher {
 
         let ignore = config.ignore.clone();
         tokio::spawn(async move {
-            while let Some(event) = rx.recv().await {
-                for path in event.paths {
-                    let path_str = path.display().to_string();
-                    if should_ignore(&path_str, &ignore) {
-                        continue;
+            let mut pending: HashMap<String, String> = HashMap::new();
+            let mut flush = tokio::time::interval(Duration::from_millis(250));
+            flush.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+            loop {
+                tokio::select! {
+                    Some(event) = rx.recv() => {
+                        for path in event.paths {
+                            let path_str = path.display().to_string();
+                            if should_ignore(&path_str, &ignore) {
+                                continue;
+                            }
+                            let kind = match event.kind {
+                                notify::EventKind::Create(_) => "file_create",
+                                notify::EventKind::Modify(_) => "file_modify",
+                                notify::EventKind::Remove(_) => "file_remove",
+                                _ => "file_event",
+                            };
+                            pending.insert(path_str, kind.to_string());
+                            if pending.len() >= 64 {
+                                flush_pending(&vault, &mut pending);
+                            }
+                        }
                     }
-                    let kind = match event.kind {
-                        notify::EventKind::Create(_) => "file_create",
-                        notify::EventKind::Modify(_) => "file_modify",
-                        notify::EventKind::Remove(_) => "file_remove",
-                        _ => "file_event",
-                    };
-                    let _ = record_filesystem_event(&vault, kind, &path_str);
+                    _ = flush.tick() => {
+                        if !pending.is_empty() {
+                            flush_pending(&vault, &mut pending);
+                        }
+                    }
                 }
             }
         });
 
         Ok(Self { _watcher: watcher })
     }
+}
+
+fn flush_pending(vault: &Vault, pending: &mut HashMap<String, String>) {
+    let batch: Vec<_> = pending
+        .drain()
+        .map(|(path, kind)| (kind, path))
+        .collect();
+    let _ = record_filesystem_events_batch(vault, &batch);
 }
 
 fn should_ignore(path: &str, patterns: &[String]) -> bool {

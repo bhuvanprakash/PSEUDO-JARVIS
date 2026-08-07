@@ -115,7 +115,12 @@ echo '{"success":true,"stdout":"discord message sent"}'
     Ok(())
 }
 
-pub fn install_builtin_slack_plugin(plugins_dir: &Path) -> jarvis_core::Result<()> {
+pub fn install_builtin_plugins_if_missing(plugins_dir: &Path) -> jarvis_core::Result<()> {
+    if plugins_dir.join("slack/plugin.yaml").exists()
+        && plugins_dir.join("discord/plugin.yaml").exists()
+    {
+        return Ok(());
+    }
     install_builtin_plugins(plugins_dir)
 }
 

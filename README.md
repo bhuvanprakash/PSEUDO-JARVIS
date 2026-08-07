@@ -173,6 +173,19 @@ Binaries:
 - `target/release/jarvis` — CLI
 - `target/release/jarvisd` — background daemon
 
+### Performance
+
+JARVIS is tuned for local machines with 4+ cores and ample RAM:
+
+- **SQLite WAL** with 64MB cache, mmap, and composite indexes
+- **Playbook cache** — avoids re-reading YAML on every phrase lookup
+- **Incremental sync** — `sync_playbooks_if_changed()` skips unchanged playbooks
+- **Batched observer events** — filesystem writes coalesced every 250ms
+- **Shared HTTP/LLM clients** — no per-step connection churn
+- **Release profile** — thin LTO + strip for smaller, faster binaries
+
+Build optimized binaries: `cargo build --release`
+
 ### Quick start
 
 ```bash

@@ -52,6 +52,18 @@ tower-http = { version = "0.5", features = ["cors", "fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+parking_lot = "0.12"
 walkdir = "2"
 toml = "0.8"
 tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.release-fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+strip = false

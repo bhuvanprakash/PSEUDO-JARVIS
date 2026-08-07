@@ -10,9 +10,11 @@ pub async fn start_scheduler(state: Arc<AppState>) -> jarvis_core::Result<()> {
     if !state.config.scheduler.enabled {
         return Ok(());
     }
-    let playbooks = state.vault.sync_playbooks()?;
+    let _ = state.vault.sync_playbooks_if_changed()?;
+    let ids = state.vault.list_playbook_ids()?;
     let mut scheduler = PlaybookScheduler::new().await?;
-    for pb in playbooks {
+    for id in ids {
+        let pb = state.vault.get_playbook(&id)?;
         if let Some(cron) = &pb.doc.spec.triggers.schedule {
             let playbook_id = pb.id().to_string();
             let state_clone = state.clone();

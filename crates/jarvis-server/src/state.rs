@@ -5,12 +5,14 @@ use jarvis_core::paths::VaultPaths;
 use jarvis_core::Vault;
 use jarvis_llm::LlmProvider;
 use jarvis_observer::ObserverService;
+use reqwest::Client;
 
 pub struct AppState {
     pub vault: Arc<Vault>,
     pub config: Config,
     pub paths: VaultPaths,
     pub llm: Arc<dyn LlmProvider>,
+    pub http_client: Client,
     pub observer: tokio::sync::Mutex<ObserverService>,
 }
 
@@ -27,6 +29,7 @@ impl AppState {
             config,
             paths,
             llm,
+            http_client: Client::new(),
             observer: tokio::sync::Mutex::new(observer),
         }
     }

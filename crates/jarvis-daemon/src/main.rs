@@ -1,11 +1,12 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use clap::Parser;
 use jarvis_core::paths::{read_auth_token, write_auth_token, VaultPaths};
 use jarvis_core::{Config, Vault};
 use jarvis_llm::ollama::create_provider;
-use jarvis_plugin::install_builtin_plugins;
+use jarvis_plugin::install_builtin_plugins_if_missing;
 use jarvis_server::{http, ipc, messaging, scheduler, AppState};
 use tracing_subscriber::EnvFilter;
 
@@ -44,8 +45,8 @@ async fn main() -> anyhow::Result<()> {
     let mut config = Config::load(&config_path)?;
     if config.vault_dir.is_none() {
         config.vault_dir = Some(paths.root.display().to_string());
+        config.save(&config_path)?;
     }
-    config.save(&config_path)?;
 
     if !paths.auth_token().exists() {
         write_auth_token(&paths.auth_token())?;
@@ -53,8 +54,7 @@ async fn main() -> anyhow::Result<()> {
     let _ = read_auth_token(&paths.auth_token())?;
 
     let vault = Arc::new(Vault::open(paths.clone())?);
-    vault.sync_playbooks()?;
-    install_builtin_plugins(&paths.plugins())?;
+    install_builtin_plugins_if_missing(&paths.plugins())?;
 
     let llm: Arc<dyn jarvis_llm::LlmProvider> = Arc::from(create_provider(
         config.llm.enabled,
@@ -64,9 +64,33 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(AppState::new(vault.clone(), config.clone(), paths.clone(), llm));
 
     {
+        let vault_bg = vault.clone();
+        tokio::spawn(async move {
+            let _ = vault_bg.sync_playbooks_if_changed();
+        });
+    }
+
+    {
         let mut observer = state.observer.lock().await;
         observer.start()?;
         observer.prune()?;
+    }
+
+    {
+        let observer_state = state.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(86_400));
+            interval.tick().await;
+            loop {
+                interval.tick().await;
+                let observer = observer_state.observer.lock().await;
+                if let Ok(n) = observer.prune() {
+                    if n > 0 {
+                        tracing::info!("pruned {n} observer events");
+                    }
+                }
+            }
+        });
     }
 
     if config.http.enabled {

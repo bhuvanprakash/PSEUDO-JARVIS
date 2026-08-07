@@ -1023,6 +1023,7 @@ dependencies = [
  "chrono",
  "dirs",
  "hex",
+ "parking_lot",
  "regex",
  "rusqlite",
  "serde",
