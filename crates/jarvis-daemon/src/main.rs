@@ -1,10 +1,10 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
 use jarvis_core::paths::{read_auth_token, write_auth_token, VaultPaths};
 use jarvis_core::{Config, Vault};
 use jarvis_llm::ollama::create_provider;
-use jarvis_observer::ObserverService;
 use jarvis_plugin::install_builtin_slack_plugin;
 use jarvis_server::{http, ipc, messaging, scheduler, AppState};
 use tracing_subscriber::EnvFilter;
@@ -16,6 +16,18 @@ struct Args {
     vault: Option<String>,
     #[arg(long)]
     foreground: bool,
+}
+
+fn resolve_tray_dir(paths: &VaultPaths) -> Option<PathBuf> {
+    let vault_tray = paths.root.join("tray");
+    if vault_tray.join("index.html").exists() {
+        return Some(vault_tray);
+    }
+    let dev = PathBuf::from("tray-ui");
+    if dev.join("index.html").exists() {
+        return Some(dev);
+    }
+    None
 }
 
 #[tokio::main]
@@ -60,8 +72,9 @@ async fn main() -> anyhow::Result<()> {
     if config.http.enabled {
         let http_state = state.clone();
         let port = config.http.port;
+        let tray_dir = resolve_tray_dir(&paths);
         tokio::spawn(async move {
-            if let Err(e) = http::serve(http_state, port).await {
+            if let Err(e) = http::serve(http_state, port, tray_dir).await {
                 tracing::error!("http server error: {e}");
             }
         });

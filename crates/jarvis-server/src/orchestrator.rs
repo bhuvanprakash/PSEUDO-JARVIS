@@ -1,11 +1,10 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 
 use jarvis_core::error::JarvisError;
 use jarvis_core::playbook::Playbook;
 use jarvis_core::trust::{summarize_step, TrustResolver};
-use jarvis_core::types::{ConfirmRequest, ConfirmResponse, TrustLevel};
+use jarvis_core::types::{ConfirmRequest, ConfirmResponse};
 use jarvis_core::variables::VariableContext;
 use jarvis_executor::{ExecutionContext, Executor};
 use jarvis_replay::{ReplayRecorder, ReplayStepLog};

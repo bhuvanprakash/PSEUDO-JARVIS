@@ -7,7 +7,7 @@ use serde_json::json;
 use crate::error::{JarvisError, Result};
 use crate::paths::VaultPaths;
 use crate::playbook::{hash_content, load_playbook, Playbook};
-use crate::types::{ObservedEvent, PatternRecord, RunRecord, TrustGrant, TrustLevel};
+use crate::types::{ObservedEvent, PatternRecord, RunRecord, TrustGrant};
 
 pub struct Vault {
     conn: Arc<Mutex<Connection>>,

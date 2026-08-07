@@ -3,19 +3,14 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum TrustLevel {
     Deny,
     Observe,
+    #[default]
     Confirm,
     Auto,
-}
-
-impl Default for TrustLevel {
-    fn default() -> Self {
-        Self::Confirm
-    }
 }
 
 impl fmt::Display for TrustLevel {

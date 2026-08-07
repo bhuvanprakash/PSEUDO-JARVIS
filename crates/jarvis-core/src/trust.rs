@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-
 use regex::Regex;
 
-use crate::error::{JarvisError, Result};
+use crate::error::Result;
 use crate::playbook::{Playbook, PlaybookStep};
 use crate::types::TrustLevel;
 use crate::vault::Vault;

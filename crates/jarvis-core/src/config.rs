@@ -1,11 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::{JarvisError, Result};
 use crate::types::TrustLevel;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub vault_dir: Option<String>,
@@ -146,21 +146,12 @@ impl Default for FilesystemObserverConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ScreenObserverConfig {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
     pub apps: Vec<String>,
-}
-
-impl Default for ScreenObserverConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            apps: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -175,7 +166,7 @@ impl Default for SchedulerConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SyncConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -183,16 +174,6 @@ pub struct SyncConfig {
     pub sync_dir: Option<String>,
     #[serde(default)]
     pub passphrase: Option<String>,
-}
-
-impl Default for SyncConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            sync_dir: None,
-            passphrase: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,7 +197,7 @@ impl Default for HttpConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MessagingConfig {
     #[serde(default)]
     pub telegram_token: Option<String>,
@@ -224,31 +205,6 @@ pub struct MessagingConfig {
     pub telegram_allowed_users: Vec<i64>,
     #[serde(default)]
     pub discord_token: Option<String>,
-}
-
-impl Default for MessagingConfig {
-    fn default() -> Self {
-        Self {
-            telegram_token: None,
-            telegram_allowed_users: Vec::new(),
-            discord_token: None,
-        }
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            vault_dir: None,
-            network_enabled: false,
-            llm: LlmConfig::default(),
-            observer: ObserverConfig::default(),
-            scheduler: SchedulerConfig::default(),
-            sync: SyncConfig::default(),
-            http: HttpConfig::default(),
-            messaging: MessagingConfig::default(),
-        }
-    }
 }
 
 impl Config {

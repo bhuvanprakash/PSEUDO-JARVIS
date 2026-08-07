@@ -2,7 +2,7 @@ use std::path::Path;
 use std::process::Stdio;
 
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

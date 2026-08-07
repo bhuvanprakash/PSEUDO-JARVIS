@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
 
 use dialoguer::Confirm;
 use jarvis_core::paths::{write_auth_token, VaultPaths};
@@ -13,7 +12,6 @@ use jarvis_plugin::install_builtin_slack_plugin;
 use jarvis_replay::{export_markdown, load_manifest, load_steps, prune_replays};
 use jarvis_server::ipc::{ipc_call, IpcRequest};
 use jarvis_server::orchestrator::{ConfirmCallback, Orchestrator, RunOptions};
-use jarvis_server::AppState;
 use jarvis_suggester::PatternSuggester;
 use jarvis_sync::VaultSync;
 
@@ -35,6 +33,12 @@ pub async fn init(vault: Option<String>) -> anyhow::Result<()> {
     }
 
     install_builtin_slack_plugin(&paths.plugins())?;
+
+    let tray_src = Path::new("tray-ui");
+    if tray_src.exists() {
+        copy_dir_all(tray_src, &paths.root.join("tray"))?;
+    }
+
     let vault = Vault::open(paths.clone())?;
     vault.sync_playbooks()?;
 

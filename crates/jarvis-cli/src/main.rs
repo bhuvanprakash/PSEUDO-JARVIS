@@ -4,10 +4,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
-use jarvis_core::paths::{read_auth_token, write_auth_token, VaultPaths};
+use jarvis_core::paths::VaultPaths;
 use jarvis_core::{Config, Vault};
 use jarvis_llm::ollama::create_provider;
-use jarvis_plugin::install_builtin_slack_plugin;
 use jarvis_server::AppState;
 use tracing_subscriber::EnvFilter;
 

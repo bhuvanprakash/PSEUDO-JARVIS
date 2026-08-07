@@ -5,6 +5,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tower_http::cors::CorsLayer;
+use tower_http::services::{ServeDir, ServeFile};
 
 use crate::orchestrator::{Orchestrator, RunOptions};
 use crate::state::AppState;
@@ -21,8 +22,8 @@ pub struct ApiResponse<T: Serialize> {
     pub data: T,
 }
 
-pub fn router(state: Arc<AppState>) -> Router {
-    Router::new()
+pub fn router(state: Arc<AppState>, tray_dir: Option<std::path::PathBuf>) -> Router {
+    let mut router = Router::new()
         .route("/health", get(health))
         .route("/status", get(status))
         .route("/observer/status", get(observer_status))
@@ -31,7 +32,18 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/run", post(run_playbook))
         .route("/suggest/scan", post(scan_patterns))
         .layer(CorsLayer::permissive())
-        .with_state(state)
+        .with_state(state);
+
+    if let Some(dir) = tray_dir {
+        if dir.exists() {
+            let index = dir.join("index.html");
+            router = router
+                .nest_service("/tray", ServeDir::new(&dir))
+                .route_service("/", ServeFile::new(index));
+        }
+    }
+
+    router
 }
 
 async fn health() -> Json<ApiResponse<&'static str>> {
@@ -121,8 +133,12 @@ async fn scan_patterns(
     }
 }
 
-pub async fn serve(state: Arc<AppState>, port: u16) -> jarvis_core::Result<()> {
-    let app = router(state);
+pub async fn serve(
+    state: Arc<AppState>,
+    port: u16,
+    tray_dir: Option<std::path::PathBuf>,
+) -> jarvis_core::Result<()> {
+    let app = router(state, tray_dir);
     let addr = format!("127.0.0.1:{port}");
     let listener = tokio::net::TcpListener::bind(&addr)
         .await

@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use crate::error::Result;
-
 #[derive(Debug, Clone)]
 pub struct VariableContext {
     values: HashMap<String, String>,

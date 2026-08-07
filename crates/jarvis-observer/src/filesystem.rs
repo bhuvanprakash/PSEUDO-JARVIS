@@ -1,8 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use jarvis_core::paths::{expand_tilde, resolve_path};
-use jarvis_core::Config;
+use jarvis_core::paths::resolve_path;
 use jarvis_core::Vault;
 use notify::{Config as NotifyConfig, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
@@ -76,11 +75,9 @@ pub fn install_shell_hook(vault_root: &Path, shell: &str) -> jarvis_core::Result
     if let Some(parent) = hook_script.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let content = format!(
-        r#"#!/bin/sh
+    let content = r#"#!/bin/sh
 jarvis observe event --command "$1" --cwd "$PWD" 2>/dev/null || true
-"#
-    );
+"#.to_string();
     std::fs::write(&hook_script, content)?;
     #[cfg(unix)]
     {

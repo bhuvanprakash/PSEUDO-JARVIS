@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::pin::Pin;
 
 use tokio_cron_scheduler::{Job, JobScheduler};
 

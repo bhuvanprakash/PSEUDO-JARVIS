@@ -16,7 +16,6 @@ pub async fn start_scheduler(state: Arc<AppState>) -> jarvis_core::Result<()> {
         if let Some(cron) = &pb.doc.spec.triggers.schedule {
             let playbook_id = pb.id().to_string();
             let state_clone = state.clone();
-            let cron_expr = cron.clone();
             scheduler
                 .add(cron, move || {
                     let state = state_clone.clone();
