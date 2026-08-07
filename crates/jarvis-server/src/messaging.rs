@@ -19,7 +19,7 @@ pub async fn start_telegram_bot(state: Arc<AppState>) -> jarvis_core::Result<()>
     info!("Telegram bot enabled");
 
     tokio::spawn(async move {
-        let client = reqwest::Client::new();
+        let client = state.http_client.clone();
         let mut offset: i64 = 0;
         loop {
             let url = format!(
@@ -54,9 +54,10 @@ pub async fn start_telegram_bot(state: Arc<AppState>) -> jarvis_core::Result<()>
                                             .and_then(|c| c.get("id"))
                                             .and_then(|v| v.as_i64())
                                             .unwrap_or(0);
+                                        let client_inner = client.clone();
                                         tokio::spawn(async move {
                                             let reply = run_phrase(&state, phrase).await;
-                                            let _ = send_telegram(&token, chat_id, &reply).await;
+                                            let _ = send_telegram(&client_inner, &token, chat_id, &reply).await;
                                         });
                                     }
                                 }
@@ -80,26 +81,10 @@ pub async fn start_discord_bot(state: Arc<AppState>) -> jarvis_core::Result<()> 
     info!("Discord bot enabled");
 
     tokio::spawn(async move {
-        let client = reqwest::Client::new();
+        let client = state.http_client.clone();
         let mut last_message_id: Option<String> = None;
         loop {
-            let mut url = "https://discord.com/api/v10/users/@me/channels".to_string();
-            match client
-                .get(&url)
-                .header("Authorization", format!("Bot {token}"))
-                .send()
-                .await
-            {
-                Ok(_) => {}
-                Err(e) => {
-                    error!("discord channel list error: {e}");
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    continue;
-                }
-            }
-
-            // Poll gateway via REST: fetch recent DMs the bot can see
-            url = "https://discord.com/api/v10/users/@me/channels".to_string();
+            let url = "https://discord.com/api/v10/users/@me/channels".to_string();
             let channels = match client
                 .get(&url)
                 .header("Authorization", format!("Bot {token}"))
@@ -155,7 +140,7 @@ pub async fn start_discord_bot(state: Arc<AppState>) -> jarvis_core::Result<()> 
                         let state = state.clone();
                         let token = token.clone();
                         let reply = run_phrase(&state, phrase).await;
-                        let _ = send_discord(&token, &channel_id, &reply).await;
+                        let _ = send_discord(&client, &token, &channel_id, &reply).await;
                     }
                 }
             }
@@ -198,8 +183,12 @@ async fn run_phrase(state: &AppState, phrase: String) -> String {
     }
 }
 
-async fn send_telegram(token: &str, chat_id: i64, text: &str) -> jarvis_core::Result<()> {
-    let client = reqwest::Client::new();
+async fn send_telegram(
+    client: &reqwest::Client,
+    token: &str,
+    chat_id: i64,
+    text: &str,
+) -> jarvis_core::Result<()> {
     let url = format!("https://api.telegram.org/bot{token}/sendMessage");
     let _ = client
         .post(&url)
@@ -213,8 +202,12 @@ async fn send_telegram(token: &str, chat_id: i64, text: &str) -> jarvis_core::Re
     Ok(())
 }
 
-async fn send_discord(token: &str, channel_id: &str, text: &str) -> jarvis_core::Result<()> {
-    let client = reqwest::Client::new();
+async fn send_discord(
+    client: &reqwest::Client,
+    token: &str,
+    channel_id: &str,
+    text: &str,
+) -> jarvis_core::Result<()> {
     let url = format!("https://discord.com/api/v10/channels/{channel_id}/messages");
     let _ = client
         .post(&url)

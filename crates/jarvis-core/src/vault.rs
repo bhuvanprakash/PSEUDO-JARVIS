@@ -1,6 +1,9 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::time::SystemTime;
 
+use parking_lot::{Mutex, RwLock};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
 
@@ -12,6 +15,8 @@ use crate::types::{ObservedEvent, PatternRecord, RunRecord, TrustGrant};
 pub struct Vault {
     conn: Arc<Mutex<Connection>>,
     pub paths: VaultPaths,
+    playbook_cache: Arc<RwLock<HashMap<String, (String, Playbook)>>>,
+    last_playbook_mtime: Mutex<Option<SystemTime>>,
 }
 
 impl Vault {
@@ -20,18 +25,25 @@ impl Vault {
         let conn = Connection::open(paths.database())?;
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
-             PRAGMA foreign_keys=ON;",
+             PRAGMA foreign_keys=ON;
+             PRAGMA synchronous=NORMAL;
+             PRAGMA busy_timeout=5000;
+             PRAGMA cache_size=-64000;
+             PRAGMA mmap_size=268435456;
+             PRAGMA temp_store=MEMORY;",
         )?;
         let vault = Self {
             conn: Arc::new(Mutex::new(conn)),
             paths,
+            playbook_cache: Arc::new(RwLock::new(HashMap::new())),
+            last_playbook_mtime: Mutex::new(None),
         };
         vault.migrate()?;
         Ok(vault)
     }
 
     fn migrate(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS events (
@@ -98,18 +110,44 @@ impl Vault {
             );
 
             CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
+            CREATE INDEX IF NOT EXISTS idx_events_source_kind_ts ON events(source, kind, ts);
             CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at);
+            CREATE INDEX IF NOT EXISTS idx_run_steps_run_id ON run_steps(run_id);
+            CREATE INDEX IF NOT EXISTS idx_patterns_status ON patterns(status);
+            CREATE INDEX IF NOT EXISTS idx_patterns_fingerprint ON patterns(fingerprint);
+            CREATE INDEX IF NOT EXISTS idx_trust_grants_playbook ON trust_grants(playbook_id);
             ",
         )?;
         Ok(())
     }
 
+    pub fn sync_playbooks_if_changed(&self) -> Result<Vec<Playbook>> {
+        let mtime = playbooks_dir_mtime(&self.paths.playbooks())?;
+        let mut last = self.last_playbook_mtime.lock();
+        if *last == Some(mtime) {
+            return Ok(Vec::new());
+        }
+        let playbooks = self.sync_playbooks()?;
+        *last = Some(mtime);
+        Ok(playbooks)
+    }
+
     pub fn sync_playbooks(&self) -> Result<Vec<Playbook>> {
         let dir = self.paths.playbooks();
         let playbooks = crate::playbook::load_playbooks_from_dir(&dir)?;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let now = chrono::Utc::now().to_rfc3339();
         for pb in &playbooks {
+            let existing_hash: Option<String> = conn
+                .query_row(
+                    "SELECT content_hash FROM playbooks WHERE id = ?1 ORDER BY version DESC LIMIT 1",
+                    params![pb.id()],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if existing_hash.as_deref() == Some(pb.content_hash.as_str()) {
+                continue;
+            }
             conn.execute(
                 "INSERT INTO playbooks (id, version, content_hash, yaml_path, created_at, source)
                  VALUES (?1, ?2, ?3, ?4, ?5, 'user')
@@ -124,25 +162,49 @@ impl Vault {
                     now,
                 ],
             )?;
+            self.playbook_cache.write().remove(pb.id());
         }
         Ok(playbooks)
     }
 
+    pub fn invalidate_playbook_cache(&self) {
+        self.playbook_cache.write().clear();
+        *self.last_playbook_mtime.lock() = None;
+    }
+
     pub fn get_playbook(&self, id: &str) -> Result<Playbook> {
-        let conn = self.conn.lock().unwrap();
-        let path: String = conn
+        if let Some((hash, pb)) = self.playbook_cache.read().get(id).cloned() {
+            let conn = self.conn.lock();
+            let db_hash: Option<String> = conn
+                .query_row(
+                    "SELECT content_hash FROM playbooks WHERE id = ?1 ORDER BY version DESC LIMIT 1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if db_hash.as_deref() == Some(hash.as_str()) {
+                return Ok(pb);
+            }
+        }
+
+        let conn = self.conn.lock();
+        let (path, content_hash): (String, String) = conn
             .query_row(
-                "SELECT yaml_path FROM playbooks WHERE id = ?1 ORDER BY version DESC LIMIT 1",
+                "SELECT yaml_path, content_hash FROM playbooks WHERE id = ?1 ORDER BY version DESC LIMIT 1",
                 params![id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?
             .ok_or_else(|| JarvisError::Playbook(format!("playbook not found: {id}")))?;
-        load_playbook(Path::new(&path))
+        let pb = load_playbook(Path::new(&path))?;
+        self.playbook_cache
+            .write()
+            .insert(id.to_string(), (content_hash, pb.clone()));
+        Ok(pb)
     }
 
     pub fn list_playbook_ids(&self) -> Result<Vec<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT DISTINCT id FROM playbooks ORDER BY id",
         )?;
@@ -163,7 +225,7 @@ impl Vault {
     }
 
     pub fn insert_event(&self, event: &ObservedEvent) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO events (ts, source, kind, payload_json, session_id, redacted)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -179,8 +241,35 @@ impl Vault {
         Ok(conn.last_insert_rowid())
     }
 
+    pub fn insert_events_batch(&self, events: &[ObservedEvent]) -> Result<usize> {
+        if events.is_empty() {
+            return Ok(0);
+        }
+        let conn = self.conn.lock();
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| JarvisError::Vault(e.to_string()))?;
+        for event in events {
+            tx.execute(
+                "INSERT INTO events (ts, source, kind, payload_json, session_id, redacted)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    event.ts,
+                    event.source,
+                    event.kind,
+                    serde_json::to_string(&event.payload)?,
+                    event.session_id,
+                    event.redacted as i64,
+                ],
+            )?;
+        }
+        tx.commit()
+            .map_err(|e| JarvisError::Vault(e.to_string()))?;
+        Ok(events.len())
+    }
+
     pub fn list_events_since(&self, since: &str, limit: usize) -> Result<Vec<(i64, ObservedEvent)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT id, ts, source, kind, payload_json, session_id, redacted
              FROM events WHERE ts >= ?1 ORDER BY ts ASC LIMIT ?2",
@@ -206,7 +295,7 @@ impl Vault {
 
     pub fn prune_events(&self, retention_days: u32) -> Result<usize> {
         let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days as i64);
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let deleted = conn.execute(
             "DELETE FROM events WHERE ts < ?1",
             params![cutoff.to_rfc3339()],
@@ -222,7 +311,7 @@ impl Vault {
         trigger: &str,
         phrase: Option<&str>,
     ) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO runs (id, playbook_id, playbook_ver, status, trigger, phrase, started_at)
              VALUES (?1, ?2, ?3, 'pending', ?4, ?5, ?6)",
@@ -244,7 +333,7 @@ impl Vault {
         status: &str,
         error: Option<&str>,
     ) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "UPDATE runs SET status = ?1, finished_at = ?2, error = ?3 WHERE id = ?4",
             params![status, chrono::Utc::now().to_rfc3339(), error, id],
@@ -261,7 +350,7 @@ impl Vault {
         input: Option<&serde_json::Value>,
         output: Option<&serde_json::Value>,
     ) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO run_steps (run_id, step_id, trust_level, status, input_json, output_json, started_at, finished_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -280,7 +369,7 @@ impl Vault {
     }
 
     pub fn list_runs(&self, limit: usize) -> Result<Vec<RunRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT id, playbook_id, playbook_ver, status, trigger, phrase, started_at, finished_at, error
              FROM runs ORDER BY started_at DESC LIMIT ?1",
@@ -304,7 +393,7 @@ impl Vault {
     }
 
     pub fn get_run(&self, id: &str) -> Result<RunRecord> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.query_row(
             "SELECT id, playbook_id, playbook_ver, status, trigger, phrase, started_at, finished_at, error
              FROM runs WHERE id = ?1",
@@ -327,7 +416,7 @@ impl Vault {
     }
 
     pub fn set_trust_grant(&self, grant: &TrustGrant) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO trust_grants (playbook_id, step_id, level, granted_at)
              VALUES (?1, ?2, ?3, ?4)
@@ -345,7 +434,7 @@ impl Vault {
     }
 
     pub fn get_trust_grant(&self, playbook_id: &str, step_id: &str) -> Result<TrustGrant> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.query_row(
             "SELECT playbook_id, step_id, level, granted_at FROM trust_grants
              WHERE playbook_id = ?1 AND step_id = ?2",
@@ -366,7 +455,7 @@ impl Vault {
     }
 
     pub fn list_trust_grants(&self) -> Result<Vec<TrustGrant>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn.prepare(
             "SELECT playbook_id, step_id, level, granted_at FROM trust_grants ORDER BY playbook_id, step_id",
         )?;
@@ -384,7 +473,7 @@ impl Vault {
     }
 
     pub fn delete_trust_grant(&self, playbook_id: &str, step_id: Option<&str>) -> Result<usize> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let n = if let Some(step) = step_id {
             conn.execute(
                 "DELETE FROM trust_grants WHERE playbook_id = ?1 AND step_id = ?2",
@@ -400,7 +489,7 @@ impl Vault {
     }
 
     pub fn upsert_pattern(&self, pattern: &PatternRecord) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO patterns (id, fingerprint, event_ids, suggested_name, confidence, status, command_sequence)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
@@ -423,7 +512,7 @@ impl Vault {
     }
 
     pub fn list_patterns(&self, status: Option<&str>) -> Result<Vec<PatternRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let query = if status.is_some() {
             "SELECT id, fingerprint, event_ids, suggested_name, confidence, status, command_sequence
              FROM patterns WHERE status = ?1 ORDER BY confidence DESC"
@@ -456,7 +545,7 @@ impl Vault {
     }
 
     pub fn update_pattern_status(&self, id: &str, status: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "UPDATE patterns SET status = ?1 WHERE id = ?2",
             params![status, id],
@@ -469,7 +558,7 @@ impl Vault {
         let yaml = crate::playbook::playbook_to_yaml(&playbook.doc)?;
         std::fs::write(&path, &yaml)?;
         let content_hash = hash_content(&yaml);
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         conn.execute(
             "INSERT INTO playbooks (id, version, content_hash, yaml_path, created_at, source)
              VALUES (?1, ?2, ?3, ?4, ?5, 'suggested')",
@@ -481,6 +570,28 @@ impl Vault {
                 chrono::Utc::now().to_rfc3339(),
             ],
         )?;
+        self.playbook_cache.write().remove(playbook.id());
         Ok(path)
     }
+}
+
+fn playbooks_dir_mtime(dir: &Path) -> Result<SystemTime> {
+    if !dir.exists() {
+        return Ok(SystemTime::UNIX_EPOCH);
+    }
+    let mut latest = SystemTime::UNIX_EPOCH;
+    for entry in walkdir::WalkDir::new(dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("yaml"))
+    {
+        if let Ok(meta) = entry.metadata() {
+            if let Ok(mtime) = meta.modified() {
+                if mtime > latest {
+                    latest = mtime;
+                }
+            }
+        }
+    }
+    Ok(latest)
 }

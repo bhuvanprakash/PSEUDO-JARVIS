@@ -39,3 +39,22 @@ pub fn record_filesystem_event(
     };
     vault.insert_event(&event)
 }
+
+pub fn record_filesystem_events_batch(
+    vault: &Vault,
+    events: &[(String, String)],
+) -> jarvis_core::Result<usize> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let batch: Vec<ObservedEvent> = events
+        .iter()
+        .map(|(kind, path)| ObservedEvent {
+            ts: now.clone(),
+            source: "filesystem".into(),
+            kind: kind.clone(),
+            payload: json!({ "path": path }),
+            session_id: None,
+            redacted: false,
+        })
+        .collect();
+    vault.insert_events_batch(&batch)
+}

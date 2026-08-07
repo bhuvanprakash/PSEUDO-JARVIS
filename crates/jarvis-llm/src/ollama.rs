@@ -71,6 +71,14 @@ impl LlmProvider for OllamaProvider {
         if playbooks.is_empty() {
             return Ok(None);
         }
+        let normalized = phrase.to_lowercase();
+        if let Some(id) = playbooks
+            .iter()
+            .find(|p| normalized.contains(&p.to_lowercase()))
+            .cloned()
+        {
+            return Ok(Some(id));
+        }
         let prompt = format!(
             "Given user phrase: \"{phrase}\"\nAvailable playbooks: {playbooks:?}\n\
              Reply with ONLY the exact playbook id that best matches, or NONE."

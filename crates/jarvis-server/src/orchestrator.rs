@@ -1,9 +1,11 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use jarvis_core::error::JarvisError;
+use jarvis_core::paths::canonicalize_allow_paths;
 use jarvis_core::playbook::Playbook;
-use jarvis_core::trust::{summarize_step, TrustResolver};
+use jarvis_core::trust::{load_grants_map, summarize_step, TrustResolver};
 use jarvis_core::types::{ConfirmRequest, ConfirmResponse};
 use jarvis_core::variables::VariableContext;
 use jarvis_executor::{ExecutionContext, Executor};
@@ -58,6 +60,24 @@ impl Orchestrator {
 
         let mut vars = VariableContext::new(&run_id);
         let trust_resolver = TrustResolver::new();
+        let trust_grants = load_grants_map(&state.vault, playbook.id())?;
+        let resolved_allow = Arc::new(canonicalize_allow_paths(
+            &playbook.doc.spec.allow_paths,
+        ));
+        let llm = if state.config.llm.enabled {
+            Some(state.llm.clone())
+        } else {
+            None
+        };
+        let exec_ctx = ExecutionContext {
+            run_id: run_id.clone(),
+            paths: state.paths.clone(),
+            resolved_allow,
+            backup_dir: backup_dir.clone(),
+            llm,
+            llm_model: state.config.llm.model.clone(),
+            http_client: state.http_client.clone(),
+        };
         let mut files_diff = Vec::new();
 
         state
@@ -65,8 +85,8 @@ impl Orchestrator {
             .update_run_status(&run_id, "running", None)?;
 
         for step in steps {
-            let trust = trust_resolver.resolve(
-                &state.vault,
+            let trust = trust_resolver.resolve_with_grants(
+                &trust_grants,
                 &playbook,
                 step,
                 options.schedule_triggered,
@@ -143,19 +163,8 @@ impl Orchestrator {
                 }
             }
 
-            let ctx = ExecutionContext {
-                run_id: run_id.clone(),
-                paths: state.paths.clone(),
-                allow_paths: playbook.doc.spec.allow_paths.clone(),
-                vars: vars.clone(),
-                backup_dir: backup_dir.clone(),
-                llm_enabled: state.config.llm.enabled,
-                llm_endpoint: state.config.llm.endpoint.clone(),
-                llm_model: state.config.llm.model.clone(),
-            };
-
             let started = chrono::Utc::now().to_rfc3339();
-            let result = Executor::execute_step(&ctx, step).await;
+            let result = Executor::execute_step(&exec_ctx, &vars, step).await;
             let finished = chrono::Utc::now().to_rfc3339();
 
             match result {

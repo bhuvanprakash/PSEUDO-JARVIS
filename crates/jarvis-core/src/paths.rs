@@ -131,16 +131,26 @@ pub fn resolve_path(path: &str) -> PathBuf {
     }
 }
 
-pub fn path_allowed(path: &Path, allowlist: &[String]) -> bool {
-    if allowlist.is_empty() {
+pub fn canonicalize_allow_paths(allowlist: &[String]) -> Vec<PathBuf> {
+    allowlist
+        .iter()
+        .map(|allowed| {
+            let path = resolve_path(allowed);
+            path.canonicalize().unwrap_or(path)
+        })
+        .collect()
+}
+
+pub fn path_allowed_canonical(path: &Path, allowed: &[PathBuf]) -> bool {
+    if allowed.is_empty() {
         return true;
     }
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    allowlist.iter().any(|allowed| {
-        let allowed_path = resolve_path(allowed);
-        let allowed_canonical = allowed_path.canonicalize().unwrap_or(allowed_path);
-        canonical.starts_with(&allowed_canonical)
-    })
+    allowed.iter().any(|a| canonical.starts_with(a))
+}
+
+pub fn path_allowed(path: &Path, allowlist: &[String]) -> bool {
+    path_allowed_canonical(path, &canonicalize_allow_paths(allowlist))
 }
 
 pub fn generate_auth_token() -> Result<String> {

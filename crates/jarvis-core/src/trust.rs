@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use regex::Regex;
 
 use crate::error::Result;
@@ -37,6 +39,17 @@ impl TrustResolver {
         step: &PlaybookStep,
         schedule_triggered: bool,
     ) -> Result<TrustLevel> {
+        let grants = load_grants_map(vault, playbook.id())?;
+        self.resolve_with_grants(&grants, playbook, step, schedule_triggered)
+    }
+
+    pub fn resolve_with_grants(
+        &self,
+        grants: &HashMap<String, TrustLevel>,
+        playbook: &Playbook,
+        step: &PlaybookStep,
+        schedule_triggered: bool,
+    ) -> Result<TrustLevel> {
         if let Some(cmd) = &step.command {
             for pattern in &self.deny_patterns {
                 if pattern.is_match(cmd) {
@@ -52,8 +65,11 @@ impl TrustResolver {
             return Ok(level);
         }
 
-        if let Ok(grant) = vault.get_trust_grant(playbook.id(), &step.id) {
-            return Ok(grant.level);
+        if let Some(level) = grants.get(&step.id) {
+            return Ok(*level);
+        }
+        if let Some(level) = grants.get("*") {
+            return Ok(*level);
         }
 
         if schedule_triggered {
@@ -76,6 +92,16 @@ impl TrustResolver {
     pub fn is_denied(level: TrustLevel) -> bool {
         matches!(level, TrustLevel::Deny)
     }
+}
+
+pub fn load_grants_map(vault: &Vault, playbook_id: &str) -> Result<HashMap<String, TrustLevel>> {
+    let mut map = HashMap::new();
+    for grant in vault.list_trust_grants()? {
+        if grant.playbook_id == playbook_id {
+            map.insert(grant.step_id.clone(), grant.level);
+        }
+    }
+    Ok(map)
 }
 
 pub fn summarize_step(step: &PlaybookStep) -> String {

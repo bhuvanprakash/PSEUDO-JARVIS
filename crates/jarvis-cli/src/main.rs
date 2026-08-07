@@ -218,7 +218,7 @@ pub fn load_state(vault: Option<String>) -> anyhow::Result<(AppState, VaultPaths
     paths.ensure_layout()?;
     let config = Config::load(&paths.config())?;
     let vault = Arc::new(Vault::open(paths.clone())?);
-    vault.sync_playbooks()?;
+    vault.sync_playbooks_if_changed()?;
     let llm: Arc<dyn jarvis_llm::LlmProvider> =
         Arc::from(create_provider(config.llm.enabled, &config.llm.endpoint));
     Ok((AppState::new(vault, config, paths.clone(), llm), paths))

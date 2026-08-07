@@ -1,13 +1,14 @@
-use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use glob::glob;
 use jarvis_core::error::JarvisError;
-use jarvis_core::paths::{path_allowed, resolve_path};
+use jarvis_core::paths::{path_allowed_canonical, resolve_path};
 use jarvis_core::playbook::{PlaybookStep, StepType};
-use jarvis_llm::{CompleteOpts, LlmProvider, OllamaProvider};
+use jarvis_core::variables::VariableContext;
+use jarvis_llm::CompleteOpts;
 use serde_json::json;
+use tokio::fs;
 use tokio::process::Command;
 use tokio::time::timeout;
 
@@ -16,26 +17,31 @@ use crate::sandbox::{is_command_blocked, redact_secrets};
 
 pub async fn dispatch(
     ctx: &ExecutionContext,
+    vars: &VariableContext,
     step: &PlaybookStep,
 ) -> jarvis_core::Result<ExecutionResult> {
     match step.step_type {
-        StepType::Shell => run_shell(ctx, step).await,
-        StepType::FileRead => run_file_read(ctx, step).await,
-        StepType::FileWrite => run_file_write(ctx, step).await,
-        StepType::FileTransform => run_file_transform(ctx, step).await,
-        StepType::DraftEmail => run_draft_email(ctx, step).await,
-        StepType::HttpLocal => run_http_local(ctx, step).await,
-        StepType::Plugin => run_plugin_step(ctx, step).await,
-        StepType::LlmTransform => run_llm_transform(ctx, step).await,
+        StepType::Shell => run_shell(ctx, vars, step).await,
+        StepType::FileRead => run_file_read(ctx, vars, step).await,
+        StepType::FileWrite => run_file_write(ctx, vars, step).await,
+        StepType::FileTransform => run_file_transform(ctx, vars, step).await,
+        StepType::DraftEmail => run_draft_email(ctx, vars, step).await,
+        StepType::HttpLocal => run_http_local(ctx, vars, step).await,
+        StepType::Plugin => run_plugin_step(ctx, vars, step).await,
+        StepType::LlmTransform => run_llm_transform(ctx, vars, step).await,
     }
 }
 
-pub async fn run_shell(ctx: &ExecutionContext, step: &PlaybookStep) -> jarvis_core::Result<ExecutionResult> {
+pub async fn run_shell(
+    ctx: &ExecutionContext,
+    vars: &VariableContext,
+    step: &PlaybookStep,
+) -> jarvis_core::Result<ExecutionResult> {
     let command = step
         .command
         .as_ref()
         .ok_or_else(|| JarvisError::Execution("shell step missing command".into()))?;
-    let command = ctx.vars.interpolate(command);
+    let command = vars.interpolate(command);
 
     if let Some(reason) = is_command_blocked(&command) {
         return Err(JarvisError::Execution(format!("blocked command: {reason}")));
@@ -44,15 +50,10 @@ pub async fn run_shell(ctx: &ExecutionContext, step: &PlaybookStep) -> jarvis_co
     let cwd = step
         .cwd
         .as_ref()
-        .map(|p| resolve_path(&ctx.vars.interpolate(p)))
+        .map(|p| resolve_path(&vars.interpolate(p)))
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
-    if !path_allowed(&cwd, &ctx.allow_paths) {
-        return Err(JarvisError::Execution(format!(
-            "cwd not allowed: {}",
-            cwd.display()
-        )));
-    }
+    ensure_allowed(&cwd, &ctx.resolved_allow)?;
 
     let duration = Executor::parse_timeout(step);
     let mut cmd = if cfg!(target_os = "windows") {
@@ -96,15 +97,20 @@ pub async fn run_shell(ctx: &ExecutionContext, step: &PlaybookStep) -> jarvis_co
     })
 }
 
-pub async fn run_file_read(ctx: &ExecutionContext, step: &PlaybookStep) -> jarvis_core::Result<ExecutionResult> {
-    let config = ctx.vars.interpolate_json(&step.config);
+pub async fn run_file_read(
+    ctx: &ExecutionContext,
+    vars: &VariableContext,
+    step: &PlaybookStep,
+) -> jarvis_core::Result<ExecutionResult> {
+    let config = vars.interpolate_json(&step.config);
     let path_str = config
         .get("path")
         .and_then(|v| v.as_str())
         .ok_or_else(|| JarvisError::Execution("file-read requires config.path".into()))?;
     let path = resolve_path(path_str);
-    ensure_allowed(&path, &ctx.allow_paths)?;
+    ensure_allowed(&path, &ctx.resolved_allow)?;
     let content = fs::read_to_string(&path)
+        .await
         .map_err(|e| JarvisError::Execution(format!("read {}: {e}", path.display())))?;
     Ok(ExecutionResult {
         output: StepOutput {
@@ -117,8 +123,12 @@ pub async fn run_file_read(ctx: &ExecutionContext, step: &PlaybookStep) -> jarvi
     })
 }
 
-pub async fn run_file_write(ctx: &ExecutionContext, step: &PlaybookStep) -> jarvis_core::Result<ExecutionResult> {
-    let config = ctx.vars.interpolate_json(&step.config);
+pub async fn run_file_write(
+    ctx: &ExecutionContext,
+    vars: &VariableContext,
+    step: &PlaybookStep,
+) -> jarvis_core::Result<ExecutionResult> {
+    let config = vars.interpolate_json(&step.config);
     let path_str = config
         .get("path")
         .and_then(|v| v.as_str())
@@ -128,12 +138,12 @@ pub async fn run_file_write(ctx: &ExecutionContext, step: &PlaybookStep) -> jarv
         .and_then(|v| v.as_str())
         .unwrap_or("");
     let path = resolve_path(path_str);
-    ensure_allowed(&path, &ctx.allow_paths)?;
-    backup_file(&ctx.backup_dir, &path)?;
+    ensure_allowed(&path, &ctx.resolved_allow)?;
+    backup_file(&ctx.backup_dir, &path).await?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent).await?;
     }
-    fs::write(&path, content)?;
+    fs::write(&path, content).await?;
     Ok(ExecutionResult {
         output: StepOutput {
             success: true,
@@ -147,45 +157,48 @@ pub async fn run_file_write(ctx: &ExecutionContext, step: &PlaybookStep) -> jarv
 
 pub async fn run_file_transform(
     ctx: &ExecutionContext,
+    vars: &VariableContext,
     step: &PlaybookStep,
 ) -> jarvis_core::Result<ExecutionResult> {
-    let config = ctx.vars.interpolate_json(&step.config);
+    let config = vars.interpolate_json(&step.config);
     let glob_pattern = config
         .get("glob")
         .and_then(|v| v.as_str())
         .ok_or_else(|| JarvisError::Execution("file-transform requires config.glob".into()))?;
-    let glob_pattern = ctx.vars.interpolate(glob_pattern);
+    let glob_pattern = vars.interpolate(glob_pattern);
     let mut changed = Vec::new();
 
     if let Some(rename_template) = config.get("rename").and_then(|v| v.as_str()) {
         for entry in glob(&glob_pattern).map_err(|e| JarvisError::Execution(e.to_string()))? {
             let path = entry.map_err(|e| JarvisError::Execution(e.to_string()))?;
-            ensure_allowed(&path, &ctx.allow_paths)?;
+            ensure_allowed(&path, &ctx.resolved_allow)?;
             let file_name = path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("file");
-            let new_name = ctx.vars.interpolate(rename_template).replace("{filename}", file_name);
+            let new_name = vars
+                .interpolate(rename_template)
+                .replace("{filename}", file_name);
             let new_path = path.with_file_name(new_name);
-            backup_file(&ctx.backup_dir, &path)?;
-            fs::rename(&path, &new_path)?;
+            backup_file(&ctx.backup_dir, &path).await?;
+            fs::rename(&path, &new_path).await?;
             changed.push(new_path.display().to_string());
         }
     }
 
     if let Some(move_to) = config.get("move_to").and_then(|v| v.as_str()) {
-        let dest_dir = resolve_path(&ctx.vars.interpolate(move_to));
-        fs::create_dir_all(&dest_dir)?;
-        ensure_allowed(&dest_dir, &ctx.allow_paths)?;
+        let dest_dir = resolve_path(&vars.interpolate(move_to));
+        fs::create_dir_all(&dest_dir).await?;
+        ensure_allowed(&dest_dir, &ctx.resolved_allow)?;
         for entry in glob(&glob_pattern).map_err(|e| JarvisError::Execution(e.to_string()))? {
             let path = entry.map_err(|e| JarvisError::Execution(e.to_string()))?;
-            ensure_allowed(&path, &ctx.allow_paths)?;
-            let file_name = path.file_name().ok_or_else(|| {
-                JarvisError::Execution("path has no file name".into())
-            })?;
+            ensure_allowed(&path, &ctx.resolved_allow)?;
+            let file_name = path
+                .file_name()
+                .ok_or_else(|| JarvisError::Execution("path has no file name".into()))?;
             let dest = dest_dir.join(file_name);
-            backup_file(&ctx.backup_dir, &path)?;
-            fs::rename(&path, &dest)?;
+            backup_file(&ctx.backup_dir, &path).await?;
+            fs::rename(&path, &dest).await?;
             changed.push(dest.display().to_string());
         }
     }
@@ -201,8 +214,12 @@ pub async fn run_file_transform(
     })
 }
 
-pub async fn run_draft_email(ctx: &ExecutionContext, step: &PlaybookStep) -> jarvis_core::Result<ExecutionResult> {
-    let config = ctx.vars.interpolate_json(&step.config);
+pub async fn run_draft_email(
+    ctx: &ExecutionContext,
+    vars: &VariableContext,
+    step: &PlaybookStep,
+) -> jarvis_core::Result<ExecutionResult> {
+    let config = vars.interpolate_json(&step.config);
     let to = config
         .get("to")
         .and_then(|v| v.as_str())
@@ -213,7 +230,9 @@ pub async fn run_draft_email(ctx: &ExecutionContext, step: &PlaybookStep) -> jar
         .unwrap_or("(no subject)");
     let body = if let Some(template) = config.get("body_template").and_then(|v| v.as_str()) {
         let template_path = resolve_path(template);
-        fs::read_to_string(&template_path).unwrap_or_else(|_| String::new())
+        fs::read_to_string(&template_path)
+            .await
+            .unwrap_or_default()
     } else {
         config
             .get("body")
@@ -221,15 +240,15 @@ pub async fn run_draft_email(ctx: &ExecutionContext, step: &PlaybookStep) -> jar
             .unwrap_or("")
             .to_string()
     };
-    let body = ctx.vars.interpolate(&body);
+    let body = vars.interpolate(&body);
 
     let draft_dir = ctx.paths.drafts();
-    fs::create_dir_all(&draft_dir)?;
+    fs::create_dir_all(&draft_dir).await?;
     let draft_path = draft_dir.join(format!("{}_{}.eml", ctx.run_id, step.id));
     let eml = format!(
         "To: {to}\r\nSubject: {subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{body}\r\n"
     );
-    fs::write(&draft_path, &eml)?;
+    fs::write(&draft_path, &eml).await?;
 
     Ok(ExecutionResult {
         output: StepOutput {
@@ -246,8 +265,12 @@ pub async fn run_draft_email(ctx: &ExecutionContext, step: &PlaybookStep) -> jar
     })
 }
 
-pub async fn run_http_local(ctx: &ExecutionContext, step: &PlaybookStep) -> jarvis_core::Result<ExecutionResult> {
-    let config = ctx.vars.interpolate_json(&step.config);
+pub async fn run_http_local(
+    ctx: &ExecutionContext,
+    vars: &VariableContext,
+    step: &PlaybookStep,
+) -> jarvis_core::Result<ExecutionResult> {
+    let config = vars.interpolate_json(&step.config);
     let url = config
         .get("url")
         .and_then(|v| v.as_str())
@@ -257,7 +280,6 @@ pub async fn run_http_local(ctx: &ExecutionContext, step: &PlaybookStep) -> jarv
             "http-local only allows localhost URLs".into(),
         ));
     }
-    let client = reqwest::Client::new();
     let method = config
         .get("method")
         .and_then(|v| v.as_str())
@@ -265,9 +287,9 @@ pub async fn run_http_local(ctx: &ExecutionContext, step: &PlaybookStep) -> jarv
     let response = match method.to_uppercase().as_str() {
         "POST" => {
             let body = config.get("body").cloned().unwrap_or(json!({}));
-            client.post(url).json(&body).send().await
+            ctx.http_client.post(url).json(&body).send().await
         }
-        _ => client.get(url).send().await,
+        _ => ctx.http_client.get(url).send().await,
     }
     .map_err(|e| JarvisError::Execution(format!("http request failed: {e}")))?;
     let status = response.status().as_u16();
@@ -283,8 +305,12 @@ pub async fn run_http_local(ctx: &ExecutionContext, step: &PlaybookStep) -> jarv
     })
 }
 
-pub async fn run_plugin_step(ctx: &ExecutionContext, step: &PlaybookStep) -> jarvis_core::Result<ExecutionResult> {
-    let config = ctx.vars.interpolate_json(&step.config);
+pub async fn run_plugin_step(
+    ctx: &ExecutionContext,
+    vars: &VariableContext,
+    step: &PlaybookStep,
+) -> jarvis_core::Result<ExecutionResult> {
+    let config = vars.interpolate_json(&step.config);
     let plugin_name = config
         .get("plugin")
         .and_then(|v| v.as_str())
@@ -324,9 +350,10 @@ pub async fn run_plugin_step(ctx: &ExecutionContext, step: &PlaybookStep) -> jar
 
 pub async fn run_llm_transform(
     ctx: &ExecutionContext,
+    vars: &VariableContext,
     step: &PlaybookStep,
 ) -> jarvis_core::Result<ExecutionResult> {
-    let config = ctx.vars.interpolate_json(&step.config);
+    let config = vars.interpolate_json(&step.config);
     let prompt = config
         .get("prompt")
         .and_then(|v| v.as_str())
@@ -337,8 +364,7 @@ pub async fn run_llm_transform(
         .unwrap_or("");
     let full_prompt = format!("{prompt}\n\nInput:\n{input}");
 
-    let result_text = if ctx.llm_enabled {
-        let provider = OllamaProvider::new(&ctx.llm_endpoint);
+    let result_text = if let Some(provider) = &ctx.llm {
         provider
             .complete(
                 &full_prompt,
@@ -354,13 +380,13 @@ pub async fn run_llm_transform(
     };
 
     if let Some(out_path) = config.get("output_path").and_then(|v| v.as_str()) {
-        let path = resolve_path(&ctx.vars.interpolate(out_path));
-        ensure_allowed(&path, &ctx.allow_paths)?;
-        backup_file(&ctx.backup_dir, &path)?;
+        let path = resolve_path(&vars.interpolate(out_path));
+        ensure_allowed(&path, &ctx.resolved_allow)?;
+        backup_file(&ctx.backup_dir, &path).await?;
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent).await?;
         }
-        fs::write(&path, &result_text)?;
+        fs::write(&path, &result_text).await?;
         return Ok(ExecutionResult {
             output: StepOutput {
                 success: true,
@@ -383,8 +409,8 @@ pub async fn run_llm_transform(
     })
 }
 
-fn ensure_allowed(path: &Path, allowlist: &[String]) -> jarvis_core::Result<()> {
-    if !path_allowed(path, allowlist) {
+fn ensure_allowed(path: &Path, allowlist: &[PathBuf]) -> jarvis_core::Result<()> {
+    if !path_allowed_canonical(path, allowlist) {
         return Err(JarvisError::Execution(format!(
             "path not allowed: {}",
             path.display()
@@ -393,16 +419,16 @@ fn ensure_allowed(path: &Path, allowlist: &[String]) -> jarvis_core::Result<()> 
     Ok(())
 }
 
-fn backup_file(backup_dir: &Path, path: &Path) -> jarvis_core::Result<()> {
+async fn backup_file(backup_dir: &Path, path: &Path) -> jarvis_core::Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    fs::create_dir_all(backup_dir)?;
+    fs::create_dir_all(backup_dir).await?;
     let file_name = path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("backup");
     let backup_path = backup_dir.join(file_name);
-    fs::copy(path, backup_path)?;
+    fs::copy(path, backup_path).await?;
     Ok(())
 }

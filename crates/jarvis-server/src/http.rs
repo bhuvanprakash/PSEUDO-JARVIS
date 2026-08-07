@@ -93,6 +93,8 @@ async fn observer_pause(State(state): State<Arc<AppState>>) -> Json<ApiResponse<
     let mut config = state.config.clone();
     config.observer.paused = true;
     let _ = config.save(&state.paths.config());
+    let mut observer = state.observer.lock().await;
+    let _ = observer.set_paused(true);
     Json(ApiResponse {
         ok: true,
         data: "paused",
@@ -103,6 +105,8 @@ async fn observer_resume(State(state): State<Arc<AppState>>) -> Json<ApiResponse
     let mut config = state.config.clone();
     config.observer.paused = false;
     let _ = config.save(&state.paths.config());
+    let mut observer = state.observer.lock().await;
+    let _ = observer.set_paused(false);
     Json(ApiResponse {
         ok: true,
         data: "resumed",
